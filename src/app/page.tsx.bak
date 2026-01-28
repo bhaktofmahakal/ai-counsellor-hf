@@ -1,0 +1,210 @@
+import { AuroraBackground } from '@/components/lightswind/aurora-background';
+import { GradientButton } from '@/components/lightswind/gradient-button';
+import { CountUp } from '@/components/lightswind/count-up';
+import { ArrowRight, Sparkles, Brain, Target, Globe, Zap, ShieldCheck, GraduationCap } from 'lucide-react';
+import Link from 'next/link';
+
+export default function LandingPage() {
+  const stats = [
+    { end: 500, suffix: '+', label: 'Universities' },
+    { end: 98, suffix: '%', label: 'Match Rate' },
+    { end: 12, suffix: 'M+', label: 'Scholarships' },
+  ];
+
+  return (
+    <div className="min-h-screen bg-slate-950 text-slate-100 selection:bg-blue-600/30">
+      {/* Navigation */}
+      <nav className="fixed top-0 w-full z-50 border-b border-white/5 bg-slate-950/50 backdrop-blur-xl">
+        <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-blue-600 to-violet-600 flex items-center justify-center font-bold text-white font-display">
+              AC
+            </div>
+            <span className="font-display font-bold text-xl tracking-tight">AI Counsellor</span>
+          </div>
+          <div className="flex items-center gap-6">
+            <Link href="/login" className="text-sm font-medium text-slate-400 hover:text-white transition-colors">
+              Sign In
+            </Link>
+            <Link href="/signup">
+              <GradientButton 
+                size="sm" 
+                gradientColors={['#2563eb', '#8b5cf6', '#10b981']}
+                className="font-medium"
+              >
+                Get Started
+              </GradientButton>
+            </Link>
+          </div>
+        </div>
+      </nav>
+
+      <AuroraBackground className="min-h-screen !bg-slate-950">
+        <div className="relative z-10 max-w-7xl mx-auto px-6 pt-32 pb-20">
+          
+          {/* Hero Section */}
+          <div className="grid lg:grid-cols-2 gap-16 items-center">
+            <div className="space-y-8">
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-600/10 border border-blue-600/20 text-blue-400 text-sm font-medium">
+                <Sparkles className="h-3.5 w-3.5" />
+                <span>AI-Powered Study Abroad Architecture</span>
+              </div>
+              
+              <h1 className="text-5xl md:text-7xl font-display font-bold leading-[0.9] tracking-tight">
+                Architect Your <br />
+                <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 via-violet-400 to-emerald-400 animate-gradient-x">
+                  Global Future
+                </span>
+              </h1>
+              
+              <p className="text-xl text-slate-400 max-w-xl leading-relaxed font-light">
+                Precision university matching, automated application roadmaps, and intelligent admission probability analysis.
+              </p>
+
+              <div className="flex flex-wrap gap-4">
+                <Link href="/signup">
+                  <GradientButton 
+                    size="lg" 
+                    className="group"
+                    gradientColors={['#2563eb', '#1d4ed8', '#0f172a']} 
+                  >
+                    Start Analysis
+                    <ArrowRight className="ml-2 h-5 w-5 transition-transform group-hover:translate-x-1" />
+                  </GradientButton>
+                </Link>
+                <Link href="/dashboard">
+                  <button className="px-8 py-3 rounded-full border border-slate-700 hover:bg-slate-800 transition-all text-slate-300 font-medium">
+                    View Demo
+                  </button>
+                </Link>
+              </div>
+
+              {/* Stats */}
+              <div className="pt-8 flex gap-12 border-t border-slate-800/50">
+                {stats.map((stat, idx) => (
+                  <div key={idx}>
+                    <div className="text-3xl font-display font-bold text-white">
+                      <CountUp value={stat.end} suffix={stat.suffix} />
+                    </div>
+                    <div className="text-sm text-slate-500 uppercase tracking-wider font-medium mt-1">
+                      {stat.label}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Abstract Visual / Hero Card */}
+            <div className="relative lg:h-[600px] flex items-center justify-center">
+              <div className="absolute inset-0 bg-gradient-to-tr from-blue-600/20 to-violet-600/20 rounded-full blur-3xl opacity-30 animate-pulse" />
+              
+              <div className="relative w-full max-w-md">
+                {/* Main Card */}
+                <div className="glass-card rounded-2xl p-6 relative z-20 transform transition-transform hover:scale-[1.02] duration-500">
+                  <div className="flex items-center justify-between mb-8">
+                    <div className="flex items-center gap-3">
+                      <div className="h-10 w-10 rounded-full bg-blue-600/20 flex items-center justify-center text-blue-400">
+                        <Brain className="h-5 w-5" />
+                      </div>
+                      <div>
+                        <div className="text-sm font-medium text-slate-400">Analysis Complete</div>
+                        <div className="text-lg font-bold text-white">Stanford University</div>
+                      </div>
+                    </div>
+                    <div className="px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-400 text-xs font-bold border border-emerald-500/20">
+                      94% MATCH
+                    </div>
+                  </div>
+                  
+                  <div className="space-y-4">
+                    <div className="space-y-2">
+                      <div className="flex justify-between text-sm">
+                        <span className="text-slate-400">Academic Fit</span>
+                        <span className="text-white">9.8/10</span>
+                      </div>
+                      <div className="h-2 rounded-full bg-slate-800 overflow-hidden">
+                        <div className="h-full w-[98%] bg-gradient-to-r from-blue-600 to-blue-400" />
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <div className="flex justify-between text-sm">
+                        <span className="text-slate-400">Budget Alignment</span>
+                        <span className="text-white">8.5/10</span>
+                      </div>
+                      <div className="h-2 rounded-full bg-slate-800 overflow-hidden">
+                        <div className="h-full w-[85%] bg-gradient-to-r from-violet-600 to-violet-400" />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-8 flex gap-3">
+                     <div className="flex-1 h-10 rounded-lg bg-slate-800/50 border border-slate-700/50 flex items-center justify-center text-sm font-medium text-slate-400">
+                        View Details
+                     </div>
+                     <div className="h-10 w-10 rounded-lg bg-blue-600 flex items-center justify-center text-white shadow-lg shadow-blue-600/20">
+                        <ArrowRight className="h-5 w-5" />
+                     </div>
+                  </div>
+                </div>
+
+                {/* Floating Elements */}
+                <div className="absolute -top-12 -right-12 glass-card p-4 rounded-xl z-10 animate-bounce delay-700">
+                  <div className="flex items-center gap-3">
+                    <div className="h-8 w-8 rounded-full bg-violet-600/20 flex items-center justify-center text-violet-400">
+                      <Target className="h-4 w-4" />
+                    </div>
+                    <div className="text-sm font-bold text-white">Target Locked</div>
+                  </div>
+                </div>
+
+                <div className="absolute -bottom-8 -left-8 glass-card p-4 rounded-xl z-30 animate-pulse">
+                  <div className="flex items-center gap-3">
+                    <div className="h-8 w-8 rounded-full bg-emerald-500/20 flex items-center justify-center text-emerald-400">
+                      <ShieldCheck className="h-4 w-4" />
+                    </div>
+                    <div className="text-sm font-bold text-white">Scholarship Found</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Feature Strip */}
+          <div className="mt-32">
+            <h2 className="text-2xl font-display font-bold text-center mb-12 text-slate-400">Powered by Advanced Intelligence</h2>
+            
+            <div className="grid md:grid-cols-3 gap-6">
+               {[
+                 {
+                   icon: Globe,
+                   title: "Global Database",
+                   desc: "Real-time data from 500+ top universities worldwide."
+                 },
+                 {
+                   icon: Zap,
+                   title: "Instant Strategy",
+                   desc: "AI-generated application roadmaps in seconds, not weeks."
+                 },
+                 {
+                   icon: GraduationCap,
+                   title: "Admission Predictor",
+                   desc: "Proprietary algorithms based on 10 years of acceptance data."
+                 }
+               ].map((feature, i) => (
+                 <div key={i} className="glass-card glass-card-hover p-8 rounded-2xl group cursor-default">
+                   <div className="h-12 w-12 rounded-xl bg-slate-800 flex items-center justify-center mb-6 group-hover:scale-110 transition-transform duration-300">
+                     <feature.icon className="h-6 w-6 text-blue-400" />
+                   </div>
+                   <h3 className="text-xl font-bold mb-3 text-white">{feature.title}</h3>
+                   <p className="text-slate-400 leading-relaxed">
+                     {feature.desc}
+                   </p>
+                 </div>
+               ))}
+            </div>
+          </div>
+        </div>
+      </AuroraBackground>
+    </div>
+  );
+}

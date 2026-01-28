@@ -1,39 +1,54 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { streamAIResponse } from '@/lib/groq';
-import { prisma } from '@/lib/prisma';
-import { getServerSession } from 'next-auth';
 
 export async function POST(request: NextRequest) {
   try {
-    const session = await getServerSession();
-    if (!session?.user?.email) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const user = await prisma.user.findUnique({
-      where: { email: session.user.email },
-    });
-
-    if (!user) {
-      return NextResponse.json({ error: 'User not found' }, { status: 404 });
-    }
-
-    const { message, history, stage } = await request.json();
+    const { message, userProfile, currentStage, conversationHistory } = await request.json();
 
     if (!message) {
-      return NextResponse.json({ error: 'Message is required' }, { status: 400 });
+      return NextResponse.json(
+        { error: 'Message is required' },
+        { status: 400 }
+      );
     }
 
-    const stream = await streamAIResponse(message, user, history, stage || user.currentStage || 2);
+    const stream = await streamAIResponse(
+      message,
+      userProfile || {},
+      conversationHistory || [],
+      currentStage || 1
+    );
 
-    // Convert the stream to a response
-    return new Response(stream as any, {
-      headers: {
-        'Content-Type': 'text/plain; charset=utf-8',
+    const encoder = new TextEncoder();
+    const readable = new ReadableStream({
+      async start(controller) {
+        try {
+          for await (const chunk of stream) {
+            const content = chunk.choices[0]?.delta?.content || '';
+            if (content) {
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content })}\n\n`));
+            }
+          }
+          controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+          controller.close();
+        } catch (error) {
+          controller.error(error);
+        }
       },
     });
-  } catch (error: any) {
-    console.error('❌ [API/AI/Chat] Error:', error);
-    return NextResponse.json({ error: 'Failed to process AI response' }, { status: 500 });
+
+    return new Response(readable, {
+      headers: {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+      },
+    });
+  } catch (error) {
+    console.error('Error in AI chat:', error);
+    return NextResponse.json(
+      { error: 'Failed to generate AI response' },
+      { status: 500 }
+    );
   }
 }

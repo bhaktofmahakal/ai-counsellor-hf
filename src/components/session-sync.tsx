@@ -1,28 +1,36 @@
-"use client";
+'use client';
 
-import { useEffect } from "react";
 import { useSession } from "next-auth/react";
+import { useEffect } from "react";
 import { useAppStore } from "@/lib/store";
 
-export const SessionSync = () => {
-  const { data: session } = useSession();
-  const { updateUser, fetchUserData } = useAppStore();
+export function SessionSync() {
+  const { data: session, status } = useSession();
+  const { login, logout, updateUser, isAuthenticated, user } = useAppStore();
 
   useEffect(() => {
-    if (session?.user?.email) {
-      // Set basic user info from session
-      updateUser({
-        name: session.user.name || "",
-        email: session.user.email,
-        avatar: session.user.image || "",
-      });
+    if (status === "authenticated" && session?.user) {
+      if (!isAuthenticated) {
+        login();
+      }
 
-      // Fetch full profile data from our API
-      fetchUserData(session.user.email);
+      // Only update if email has ACTUALLY changed (not just empty -> filled)
+      const storeEmail = user.email || '';
+      const sessionEmail = session.user.email || '';
+
+      if (storeEmail !== sessionEmail && sessionEmail) {
+        console.log('🔄 [SessionSync] Identity changed:', { from: storeEmail, to: sessionEmail });
+        updateUser({
+          id: (session.user as any).id,
+          name: session.user.name || user.name || "Student",
+          email: sessionEmail,
+          onboardingCompleted: (session.user as any).onboardingCompleted ?? user.onboardingCompleted ?? false
+        });
+      }
+    } else if (status === "unauthenticated" && isAuthenticated) {
+      logout();
     }
-  }, [session, updateUser, fetchUserData]);
+  }, [session, status, login, logout, updateUser, isAuthenticated, user.email]);
 
   return null;
-};
-
-export default SessionSync;
+}
