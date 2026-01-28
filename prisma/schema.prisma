@@ -1,0 +1,101 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model User {
+  id                  String      @id @default(cuid())
+  email               String      @unique
+  name                String?
+  createdAt           DateTime    @default(now())
+  updatedAt           DateTime    @updatedAt
+  education           String?
+  degree              String?
+  gpa                 String?
+  studyGoal           String?
+  targetField         String?
+  preferredCountries  String[]    @default([])
+  budgetMin           Int         @default(0)
+  budgetMax           Int         @default(0)
+  examStatus          String?
+  examScores          String?
+  onboardingCompleted Boolean     @default(false)
+  currentStage        Int         @default(1)
+  lockedUniversityId  String?
+  avatar              String?
+  shortlists          Shortlist[]
+  tasks               Task[]
+
+  @@index([email])
+}
+
+model University {
+  id             String      @id @default(cuid())
+  name           String
+  location       String?
+  country        String
+  rank           Int?
+  tuition        Int
+  acceptanceRate String?
+  matchScore     Int         @default(0)
+  tags           String[]    @default([])
+  programs       String[]    @default([])
+  description    String?
+  risks          String[]    @default([])
+  strengths      String[]    @default([])
+  website        String?
+  domain         String?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+  shortlists     Shortlist[]
+
+  @@index([country])
+  @@index([name])
+}
+
+model Shortlist {
+  id           String     @id @default(cuid())
+  userId       String
+  universityId String
+  createdAt    DateTime   @default(now())
+  university   University @relation(fields: [universityId], references: [id], onDelete: Cascade)
+  user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, universityId])
+  @@index([userId])
+}
+
+model Task {
+  id        String   @id @default(cuid())
+  userId    String
+  title     String
+  completed Boolean  @default(false)
+  priority  String   @default("medium")
+  due       String?
+  stage     Int      @default(1)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([stage])
+}
+
+model Conversation {
+  id        String   @id @default(cuid())
+  userId    String
+  sessionId String   @default("default")
+  title     String?  @default("New Conversation")
+  role      String
+  content   String
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([sessionId])
+  @@index([createdAt])
+}
