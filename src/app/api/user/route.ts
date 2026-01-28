@@ -105,10 +105,10 @@ export async function PATCH(request: NextRequest) {
       update: cleanedData,
       create: {
         email,
-        name: cleanedData.name || 'Student',
-        onboardingCompleted: cleanedData.onboardingCompleted ?? false,
-        currentStage: cleanedData.currentStage || 1,
-        ...cleanedData,
+        name: (cleanedData as any).name || 'Student',
+        onboardingCompleted: (cleanedData as any).onboardingCompleted ?? false,
+        currentStage: (cleanedData as any).currentStage || 1,
+        ...(cleanedData as any),
       },
     });
 
