@@ -21,7 +21,7 @@ import {
 } from 'lucide-react';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/lightswind/avatar';
 import { useAppStore } from '@/lib/store';
-import { MarkdownRenderer } from '@/components/MarkdownRenderer';
+import MarkdownRenderer from '@/components/MarkdownRenderer';
 import { toast } from 'sonner';
 
 type Message = {
