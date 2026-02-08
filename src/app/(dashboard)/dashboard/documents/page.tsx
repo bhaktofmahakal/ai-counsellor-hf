@@ -1,11 +1,11 @@
 
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Card } from '@/components/lightswind/card';
 import { GradientButton } from '@/components/lightswind/gradient-button';
 import { Badge } from '@/components/lightswind/badge';
-import { FileText, Download, Trash2, Edit3, Plus, Save, Sparkles, Clock, CheckCircle, AlertCircle } from 'lucide-react';
+import { FileText, Download, Trash2, Edit3, Plus, Save, Sparkles, Clock, CheckCircle, AlertCircle, Upload, Eye } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAppStore } from '@/lib/store';
 import { MarkdownRenderer } from '@/components/MarkdownRenderer';
@@ -26,6 +26,7 @@ export default function DocumentsPage() {
     const [editingId, setEditingId] = useState<string | null>(null);
     const [editData, setEditData] = useState({ title: '', content: '', type: 'SOP' });
     const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+    const fileInputRef = useRef<HTMLInputElement>(null);
 
     useEffect(() => {
         fetchDocuments();
@@ -43,6 +44,54 @@ export default function DocumentsPage() {
         } finally {
             setIsLoading(false);
         }
+    };
+
+    const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        toast.promise(
+            async () => {
+                const reader = new FileReader();
+                const filePromise = new Promise<string>((resolve, reject) => {
+                    reader.onload = () => resolve(reader.result as string);
+                    reader.onerror = reject;
+                    if (file.type === 'application/pdf' || file.type.startsWith('image/')) {
+                        reader.readAsDataURL(file); // Base64 for binary files
+                    } else {
+                        reader.readAsText(file); // Plain text for .txt/md
+                    }
+                });
+
+                const fileContent = await filePromise;
+
+                // Try to infer type
+                let type = 'OTHER';
+                if (file.name.toLowerCase().includes('sop') || file.name.toLowerCase().includes('statement')) type = 'SOP';
+                else if (file.name.toLowerCase().includes('resume') || file.name.toLowerCase().includes('cv')) type = 'RESUME';
+                else if (file.name.toLowerCase().includes('lor') || file.name.toLowerCase().includes('letter')) type = 'LOR';
+                else if (file.name.toLowerCase().includes('transcript')) type = 'TRANSCRIPT';
+
+                const res = await fetch('/api/documents', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        title: file.name,
+                        type,
+                        content: fileContent,
+                        status: 'ready'
+                    }),
+                });
+
+                if (!res.ok) throw new Error('Failed to upload');
+                await fetchDocuments();
+            },
+            {
+                loading: `Uploading ${file.name}...`,
+                success: `${file.name} uploaded successfully!`,
+                error: `Failed to upload ${file.name}`,
+            }
+        );
     };
 
     const handleCreate = () => {
@@ -91,6 +140,14 @@ export default function DocumentsPage() {
     };
 
     const exportPDF = (doc: Document) => {
+        if (doc.content.startsWith('data:application/pdf;base64,')) {
+            const link = document.createElement('a');
+            link.href = doc.content;
+            link.download = doc.title;
+            link.click();
+            return;
+        }
+
         const printWindow = window.open('', '_blank');
         if (!printWindow) return;
 
@@ -181,9 +238,24 @@ export default function DocumentsPage() {
                     <p className="text-slate-400 mt-2">Draft, edit, and export your application documents.</p>
                 </div>
                 {!editingId && (
-                    <GradientButton onClick={handleCreate} className="h-12 px-6 w-full sm:w-auto">
-                        <Plus className="h-4 w-4 mr-2" /> New Document
-                    </GradientButton>
+                    <div className="flex gap-2 w-full sm:w-auto">
+                        <input
+                            type="file"
+                            ref={fileInputRef}
+                            onChange={handleUpload}
+                            className="hidden"
+                            accept=".pdf,.doc,.docx,.txt"
+                        />
+                        <button
+                            onClick={() => fileInputRef.current?.click()}
+                            className="h-12 px-6 rounded-xl bg-white/5 hover:bg-white/10 text-white border border-white/10 transition-all font-bold flex items-center justify-center gap-2"
+                        >
+                            <Upload className="h-4 w-4" /> Upload
+                        </button>
+                        <GradientButton onClick={handleCreate} className="h-12 px-6 flex-1 sm:flex-initial">
+                            <Plus className="h-4 w-4 mr-2" /> New Document
+                        </GradientButton>
+                    </div>
                 )}
             </div>
 
@@ -293,7 +365,21 @@ export default function DocumentsPage() {
                                             </div>
                                         </div>
                                     </div>
-                                    <div className="flex items-center gap-2 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity justify-end">
+                                    <div className="flex items-center gap-2 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity justify-end">
+                                        {doc.content.startsWith('data:') && (
+                                            <button
+                                                onClick={() => {
+                                                    const win = window.open();
+                                                    if (win) {
+                                                        win.document.write(`<iframe src="${doc.content}" frameborder="0" style="border:0; top:0px; left:0px; bottom:0px; right:0px; width:100%; height:100%;" allowfullscreen></iframe>`);
+                                                    }
+                                                }}
+                                                className="p-2.5 bg-emerald-600/10 sm:bg-transparent hover:bg-emerald-600/20 rounded-lg text-emerald-500 hover:text-emerald-400 transition-colors"
+                                                title="View Document"
+                                            >
+                                                <Eye className="h-4 w-4" />
+                                            </button>
+                                        )}
                                         <button
                                             onClick={() => { setEditingId(doc.id); setEditData({ title: doc.title, content: doc.content, type: doc.type }); }}
                                             className="p-2.5 bg-white/5 sm:bg-transparent hover:bg-white/10 rounded-lg text-slate-400 hover:text-white transition-colors"

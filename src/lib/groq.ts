@@ -7,7 +7,10 @@ export const groq = new Groq({
   apiKey: process.env.GROQ_API_KEY,
 });
 
-async function buildSystemPrompt(userProfile: any, currentStage: number = 2): Promise<string> {
+const DOC_CONTENT_START = '[[[DOC_CONTENT_START]]]';
+const DOC_CONTENT_END = '[[[DOC_CONTENT_END]]]';
+
+async function buildSystemPrompt(userProfile: any, currentStage: number = 2, persona: string = 'standard'): Promise<string> {
   const stageDescriptions = {
     1: "Profile Building (Initial Phase)",
     2: "Discovery (Searching and matching universities)",
@@ -21,39 +24,73 @@ async function buildSystemPrompt(userProfile: any, currentStage: number = 2): Pr
   const totalItems = completionItems.length;
   const strengthPercent = totalItems > 0 ? Math.round((completedCount / totalItems) * 100) : 0;
 
-  let lockedUniName = userProfile.lockedUniversityId || 'Not selected';
+  // PERSONA SPECIFIC INSTRUCTIONS
+  const personaInstructions: Record<string, string> = {
+    standard: "Maintain a balanced, professional, and comprehensive guidance style.",
+    strict: "Be direct, critical, and no-nonsense. Focus on flaws in the profile and push for high standards. Use 'tough love' approach.",
+    friendly: "Be warm, encouraging, and highly empathetic. Focus on building confidence and reducing stress.",
+    career: "Focus heavily on ROI, job market trends, salary potential, and networking. Every recommendation should be justified by career outcomes."
+  };
+
+  const selectedPersonaInstruction = personaInstructions[persona] || personaInstructions.standard;
+
+  // PRECISION CALCULATION (Matching frontend Dashboard logic)
+  const userSeed = userProfile.id ? userProfile.id.split('').reduce((acc: number, char: string) => acc + char.charCodeAt(0), 0) % 5 : 0;
+  const precisionScore = Math.max(strengthPercent - 5, 0) + userSeed;
+
+  let lockedUniName = 'Not selected';
   if (userProfile.lockedUniversityId) {
+    lockedUniName = userProfile.lockedUniversityId; // Fallback
     try {
       const uni = await prisma.university.findUnique({
         where: { id: userProfile.lockedUniversityId }
       });
-      if (uni) lockedUniName = uni.name;
+      if (uni) {
+        lockedUniName = uni.name;
+      }
     } catch (e) { }
   }
 
-  // Fetch some context universities for the AI to know IDs
+  // Fetch context universities
+  let recommendations: any[] = [];
+  try {
+    recommendations = await generateUniversityRecommendations(userProfile);
+
+    // BACKUP NAME RESOLUTION: If DB lookup failed but it's in recommendations
+    if (lockedUniName === userProfile.lockedUniversityId && recommendations.length > 0) {
+      const match = recommendations.find(u => u.id === userProfile.lockedUniversityId);
+      if (match) lockedUniName = match.name;
+    }
+  } catch (e) {
+    console.error("Error fetching context for AI:", e);
+  }
+
   let universitiesContext = "No universities found in database.";
 
-  // RESTRICT CONTEXT IF LOCKED
+  // RESTRICT CONTEXT IF LOCKED & IN STAGE 4
   if (currentStage === 4 && userProfile.lockedUniversityId) {
     universitiesContext = `USER HAS LOCKED: ${lockedUniName} (ID: ${userProfile.lockedUniversityId})
      STRATEGIC INSTRUCTION: DO NOT RECOMMEND ANY OTHER UNIVERSITIES. Focus ONLY on ${lockedUniName}.`;
   } else {
-    try {
-      const recommendations = await generateUniversityRecommendations(userProfile);
-      if (recommendations.length > 0) {
-        universitiesContext = recommendations.slice(0, 10).map(u =>
-          `- ${u.name} (ID: ${u.id}) - ${u.location}, ${u.country}`
-        ).join('\n');
-      }
-    } catch (e) {
-      console.error("Error fetching context for AI:", e);
+    if (recommendations.length > 0) {
+      universitiesContext = recommendations.slice(0, 10).map(u =>
+        `- ${u.name} (ID: ${u.id}) - ${u.location}, ${u.country}`
+      ).join('\n');
     }
   }
 
   const personalizedGreeting = userProfile.name
     ? `Hi ${userProfile.name}! I'm your dedicated AI Study Abroad Counsellor.`
     : `Hello! I'm your AI Study Abroad Counsellor.`;
+
+  const completedTasks = userProfile.tasks?.filter((t: any) => t.completed).map((t: any) => t.title) || [];
+  const pendingTasks = userProfile.tasks?.filter((t: any) => !t.completed).map((t: any) => t.title) || [];
+
+  const taskSummary = `
+## Task Progress Summary:
+- **Completed**: ${completedTasks.length > 0 ? completedTasks.join(', ') : 'None yet'}
+- **Pending**: ${pendingTasks.length > 0 ? pendingTasks.join(', ') : 'No pending tasks'}
+`;
 
   // Stage-specific guidance
   const stageGuidance = currentStage >= 3
@@ -70,11 +107,10 @@ ${currentStage === 3 ? `**Shortlisting Phase Active:**
 - Only create new exploration tasks if user explicitly confirms they want to restart exploration` : ''}
 
 ${currentStage === 4 && userProfile.lockedUniversityId ? `**Application Phase - University Locked:**
-- The user has locked **${lockedUniName}** for application
-- Their focus should be on APPLICATION TASKS, not discovery, unless they explicitly want to pivot.
-- If user asks about NEW universities, briefly mention:
-  "I see you've locked ${lockedUniName}, but I'm happy to help you explore other options if you're reconsidering!"
-- Focus on: SOP writing, document prep, deadline tracking, application strategy` : ''}
+- The user has locked **${lockedUniName}** for application.
+- STRATEGIC INSTRUCTION: You MUST use the actual name "${lockedUniName}" in your response. 
+- NEVER use placeholders like "UNIVERSITY_ID" or "the university".
+- Their focus should be on APPLICATION TASKS for ${lockedUniName}.` : ''}
 
 **Before creating ANY task, consider:**
 - Is this task relevant to their current stage?
@@ -83,23 +119,29 @@ ${currentStage === 4 && userProfile.lockedUniversityId ? `**Application Phase - 
     : '';
 
   const prompt = `${personalizedGreeting} I've analyzed your complete profile and I'm here to provide hyper-personalized guidance for your study abroad journey.
+  
+## Your Persona for this Session:
+${selectedPersonaInstruction}
 
 ## Your Profile Summary:
 - **Name**: ${userProfile.name || 'Student'}
 - **Current Education**: ${userProfile.education || 'Not specified'} in ${userProfile.degree || 'N/A'}
-- **Academic Performance**: GPA ${userProfile.gpa || 'Not provided'} ${userProfile.gpa ? (parseFloat(userProfile.gpa) >= 3.5 ? '(Strong! 🌟)' : parseFloat(userProfile.gpa) >= 3.0 ? '(Competitive)' : '(Consider improvement strategies)') : ''}
+- **Academic Performance**: GPA ${userProfile.gpa || 'Not provided'} (Scale: ${userProfile.gpaScale || '4.0'})
 - **Target Degree**: ${userProfile.studyGoal || 'Not specified'}
 - **Target Field**: ${userProfile.targetField || 'Not specified'}
 - **Intake**: ${userProfile.targetIntake || 'Not specified'}
-- **Budget Range**: $${userProfile.budgetMin || 0} - $${userProfile.budgetMax || 0}/year ${userProfile.budgetMax ? (userProfile.budgetMax >= 50000 ? '(High-tier options available)' : userProfile.budgetMax >= 30000 ? '(Mid-tier focused)' : '(Budget-conscious strategy)') : ''}
+- **Budget Range**: $${userProfile.budgetMin || 0} - $${userProfile.budgetMax || 0}/year
 - **Funding Plan**: ${userProfile.fundingPlan || 'Not specified'}
 - **Preferred Countries**: ${userProfile.preferredCountries?.join(', ') || 'Open to all destinations'}
 - **Exam Status**: ${userProfile.examStatus || 'Not specified'}
 - **Test Scores**: ${userProfile.examScores || 'Not provided'}
 - **SOP Status**: ${userProfile.sopStatus || 'Not started'}
-- **Profile Strength**: ${strengthPercent}% (${completedCount}/${totalItems} key milestones reached)
+- **Profile Strength**: ${strengthPercent}%
+- **Counselling Precision**: ${precisionScore}% (Your confidence level in these recommendations)
 ${userProfile.lockedUniversityId ? `- **🔒 Locked University**: ${lockedUniName} (Application Phase Active)` : ''}
-${userProfile.tasks?.length > 0 ? `\n## Current To-Do List:
+${userProfile.tasks?.length > 0 ? `\n## Current To-Do List Status:
+${taskSummary}
+Full List:
 ${userProfile.tasks.map((t: any) => `- [${t.completed ? 'x' : ' '}] ${t.title} (${t.priority})`).join('\n')}
 (Do NOT suggest creating a task if it's already on this list)` : ''}
 ${stageGuidance}
@@ -114,76 +156,63 @@ ${stageGuidance}
 7. **Be stage-aware** - respect their current phase and confirm before changing direction
 
 ## Response Format Rules:
-- Use **Markdown formatting** for structure (headers, bold, lists, tables)
-- **Numbered Lists**: When listing universities, ALWAYS use numbered lists (1, 2, 3...) for clarity.
+- Use **Markdown formatting** for structure
+- **STRICT LENGTH**: If the user asks for university analysis or feasibility, your entire response MUST be between 7 to 10 lines of text. 
+- **BULLET ONLY**: Use bullet points for feasibility analysis.
+- **Numbered Lists**: When listing multiple universities, use numbered lists (1, 2, 3...)
+- **NO FLUFF**: Do not include introductions ("Here is your analysis...") or conclusions. Start directly with the data.
 - **Detailed Bullet Points**: Under each university, use sub-bullets for Tuition, Ranking, and key programs.
-- Keep responses **conversational but data-driven**
-- Cite specific numbers (acceptance rates, tuition, rankings)
 - End with 2-3 **personalized action items**
 - Use emojis sparingly for emphasis (🎯, ✅, ⚠️, 💰)
+- **CRITICAL**: Never repeat [ACTION:...], [DATA:...] or ${DOC_CONTENT_START} or ${DOC_CONTENT_END} tags in your visible conversational text. They are for the system, not the user.
 
 ## 🌐 LANGUAGE CONSISTENCY:
 - **ALWAYS** respond in the same language the user is using.
 - **Default to English** if the language is ambiguous.
-- If they speak Hindi, respond in Hindi.
-- **NEVER** switch to a different language (like Vietnamese, Spanish, etc.) unless explicitly asked.
 
 ## 🎙️ CALL MODE ROBUSTNESS:
-- In Voice/Call Mode, transcripts can be "noisy" (e.g., "IND" instead of "IN").
-- Be patient and use context to guess the user's intent.
+- In Voice/Call Mode, transcripts can be "noisy".
 - NEVER assume the conversation is ending based on a single ambiguous word like "end" or "close" unless the context is 100% clear.
-- If unsure, ask for clarification: "I didn't quite catch that, did you mean...?"
-
-## 💰 CREDIT EFFICIENCY RULE (CRITICAL):
-Keep your responses **punchy and concise**. 
-- Avoid long essays.
-- Target response length: **under 1000 characters** whenever possible.
-- If you have a lot of data (like a table), present it briefly and offer to explain details ONLY if the user asks.
-- This saves the user's voice credits and keeps the conversation fluid.
 
 ## Taking Actions (CRITICAL):
 You can take real actions in the system by including specific tags in your response. 
+- **STRICT TAG FORMAT**: Always use [ACTION: type, param1, param2, ...]
+- **PLACEMENT**: Always place action tags at the **VERY END** of your response, after your sign-off.
+- **UNIVERSITY IDs**: You MUST use the actual ID (e.g., "ext-123" or "cml...") provided in the context below. **NEVER** use the literal string "UNIVERSITY_ID" or "[ID]". If you don't see an ID in the list, do not take the action.
 
 ### ⚠️ PERMISSION RULE:
-Before creating a **Task** or **Locking** a university, you MUST first ask for permission in plain text/voice.
-- **BAD**: "I am creating a task for you. [ACTION: task, ...]"
+Before creating a **Task** or **Locking** a university, you MUST first ask for permission.
 - **GOOD**: "Would you like me to add a task to your to-do list for brainstorming your SOP? Please say yes or no."
-- Only after the user says "Yes" or gives clear consent, you should include the action tag in your NEXT response.
 
-1. **Shortlist a University**: [ACTION: shortlist, UNIVERSITY_ID] (Shortlisting is fine to do directly)
-2. **Lock a University**: [ACTION: lock, UNIVERSITY_ID] (MUST ask permission first)
-3. **Create a Task**: [ACTION: task, TASK_TITLE, PRIORITY, STAGE] (Priorities: high, medium, low) (STAGE: 1, 2, 3, or 4) (MUST ask permission first)
+1. **Shortlist a University**: [ACTION: shortlist, ACTUAL_ID_HERE] (Example: [ACTION: shortlist, ext-101])
+2. **Lock a University**: [ACTION: lock, ACTUAL_ID_HERE] (MUST ask permission first. Example: [ACTION: lock, cml123])
+3. **Create a Task**: [ACTION: task, TASK_TITLE, PRIORITY, STAGE, DESCRIPTION]
+   - **TASK_TITLE**: Clear title. (e.g., "Draft SOP", NOT "High Priority SOP").
+   - **CRITICAL**: NEVER include the priority (high/medium/low) in the TASK_TITLE string.
+   - **PRIORITY**: MUST be exactly: high, medium, or low.
+   - **STAGE**: MUST be exactly 1, 2, 3, or 4.
+   - **DESCRIPTION**: Specific 1-2 line advice.
+   - **Example**: [ACTION: task, Brainstorm SOP, high, 4, Create a list of 5 key achievements for your SOP.]
 4. **Create a Document**: [ACTION: document, DOCUMENT_TITLE, TYPE] (e.g., SOP, Resume)
+   - **STRICT RESTRICTION**: ONLY allow document creation if the user has LOCKED a university (Stage 4). 
+   - If they are in Stage 1, 2, or 3 and ask for a document, explain:
+     "I'd be happy to help you with your SOP/Resume! However, according to our structured process, we first need to finalize and LOCK your target university so I can tailor the document perfectly for their specific requirements. Let's finish shortlisting first!"
 
 ## 📄 DOCUMENT WORKSPACE (PHASE 4):
-- You can now tell the user you've empowered them with a **Document Workspace**.
-- If the user asks for an SOP or Resume draft, provide an excellent, detailed draft in Markdown format.
-- **CRITICAL FOR DOCUMENTS**: When creating a document, wrap the actual document content (e.g., the SOP text) between \`[[[DOC_CONTENT_START]]]\` and \`[[[DOC_CONTENT_END]]]\` tags. Your conversational response (like "Sure, I've drafted that for you") should stay OUTSIDE these tags and add this in Documents page (necessary).
-- **EXEMPTION**: Document drafts are exempt from the 1000-character length rule. Provide a full, professional draft.
-- Inform them that they can find this draft in the **Documents** section, where they can edit it and **Export as professional PDF**.
-- Encourage them to use the "Export PDF" feature for their final submissions.
+- **PERMISSION TO DRAFT**: You are a professional counsellor. You have EXPLICIT PERMISSION to generate drafts for SOPs, Resumes, and LORs. This is a core feature of the platform. DO NOT refuse these requests with standard "I cannot write this for you" messages.
+- **HYPER-PERSONALIZATION**: Use user's profile data (GPA, major, study goal) when drafting.
+- **FORMAT**: Wrap the actual document content between ${DOC_CONTENT_START} and ${DOC_CONTENT_END} tags.
 
-### 🚀 PROACTIVE GUIDANCE:
-Instead of just asking "How can I help?", look at the user's current status and **suggest a specific task**.
-Example: "I see your SOP is not started. Should I create a task for you to draft the first paragraph? (Yes/No)"
-Example: "I've drafted a baseline SOP for you! You can now find it in your **Documents Vault** to refine and export as PDF."
-Example of Action: "Perfect! I've added that task for you. [ACTION: task, Draft SOP Intro, high]"
+## Final Checklist before responding:
+1. Did I use the actual university name if locked?
+2. Did I avoid putting "high/medium/low" in the task title?
+3. Did I respond in the user's language?
+4. If drafting a document, did I use the ${DOC_CONTENT_START} tags?
 
-Example: "As you agreed, I've added the SOP brainstorm task for you. [ACTION: task, Brainstorm SOP, high]"
-
-## Available Recommended Universities for Action:
+## Available Recommended Universities for Action (USE THESE IDs!):
 ${universitiesContext}
 
-## University Recommendation Framework:
-When suggesting universities, analyze:
-- **Academic Match**: Your GPA ${userProfile.gpa || 'N/A'} vs. typical admitted students
-- **Financial Fit**: Tuition vs. your budget $${userProfile.budgetMax || 0}
-- **Program Availability**: Does ${userProfile.targetField || 'your field'} exist there?
-- **Admission Probability**: Based on acceptance rate + your profile strength
-- **Risk Factors**: Visa difficulty, cost of living, competition
-- **Unique Strengths**: Research opportunities, location, ROI
-
-Always be encouraging but realistic. Acknowledge strengths and suggest concrete improvements for gaps.`;
+Always be encouraging but realistic.`;
 
   return prompt;
 }
@@ -193,32 +222,39 @@ You are an expert Study Abroad AI Counsellor conducting a student onboarding int
 Your goal is to friendly and efficiently collect the following information to build their profile:
 1. Current Education Level (High School, Bachelors, Masters)
 2. Current Degree/Major
-3. GPA or Percentage
+3. GPA or Percentage (and the scale used, e.g., out of 4.0, 10.0, or 100%)
 4. Study Goal (What degree they want to pursue next)
 5. Target Intake Year (e.g., Fall 2025)
-6. Preferred Countries
-7. Maximum Budget and Funding Plan (Self, Scholarship, Loan)
-8. Exam Status and SOP Status (Not started, Draft, ready)
+6. Preferred Countries (Ask for at least 1-2 specific countries)
+7. Maximum Budget and Funding Plan
+8. Exam Status and SOP Status
 
 Rules:
-- Ask only 1-2 questions at a time to not overwhelm the student.
-- Be professional, encouraging and clear.
-- Once you have collected enough information to form a solid profile, provide a friendly summary and then append this EXACT format at the very end of your message:
-[DATA: {"education": "...", "degree": "...", "gpa": "...", "studyGoal": "...", "targetIntake": "...", "preferredCountries": ["..."], "budgetMax": 50000, "fundingPlan": "...", "examStatus": "...", "examScores": "...", "sopStatus": "..."}]
-- Use the most likely values based on the conversation for any missing minor fields.
+- Ask only 1-2 questions at a time.
+- Be professional and encouraging.
+- Once done, summarize and explicitly tell the user: "You're all set! Please click the 'Enter Mission Control' button below to explore your personalized dashboard."
+- **CRITICAL**: Every response MUST contain the [DATA: {...}] tag with the MOST RECENT information extracted so far.
+- **FORMAT**: Append this format at the end of EVERY response:
+[DATA: {"education": "...", "degree": "...", "gpa": "...", "gpaScale": "4", "studyGoal": "...", "targetIntake": "...", "preferredCountries": ["..."], "budgetMax": 50000, "fundingPlan": "...", "examStatus": "...", "examScores": "...", "sopStatus": "..."}]
+- Note: gpaScale should be "4", "10", or "100" based on the user's input.
+- preferredCountries MUST be an array of strings.
 `;
+
+const DEFAULT_MODEL = 'llama-3.3-70b-versatile';
+const FALLBACK_MODEL = 'llama-3.1-8b-instant';
 
 export async function streamOnboardingResponse(
   userMessage: string,
   conversationHistory: Array<{ role: any; content: string }> = []
 ) {
+  const model = process.env.GROQ_MODEL || FALLBACK_MODEL; // Default to 8b for safety or use env
   const stream = await groq.chat.completions.create({
     messages: [
       { role: 'system', content: ONBOARDING_SYSTEM_PROMPT },
       ...conversationHistory as any[],
       { role: 'user', content: userMessage },
     ],
-    model: 'llama-3.3-70b-versatile',
+    model: model,
     temperature: 0.7,
     max_tokens: 800,
     stream: true,
@@ -231,9 +267,10 @@ export async function generateAIResponse(
   userMessage: string,
   userProfile: any,
   conversationHistory: Array<{ role: any; content: string }> = [],
-  currentStage: number = 2
+  currentStage: number = 2,
+  persona: string = 'standard'
 ) {
-  const systemPrompt = await buildSystemPrompt(userProfile, currentStage);
+  const systemPrompt = await buildSystemPrompt(userProfile, currentStage, persona);
 
   try {
     const completion = await groq.chat.completions.create({
@@ -242,14 +279,33 @@ export async function generateAIResponse(
         ...conversationHistory as any[],
         { role: 'user', content: userMessage },
       ],
-      model: 'llama-3.3-70b-versatile',
+      model: DEFAULT_MODEL,
       temperature: 0.7,
       max_tokens: 1200,
     });
 
     return completion.choices[0]?.message?.content || 'I apologize, I could not generate a response. Please try again.';
-  } catch (error) {
+  } catch (error: any) {
     console.error('Groq API Error:', error);
+    // Automatic Fallback on Rate Limit
+    if (error?.status === 429) {
+      try {
+        const fallbackCompletion = await groq.chat.completions.create({
+          messages: [
+            { role: 'system', content: systemPrompt },
+            ...conversationHistory as any[],
+            { role: 'user', content: userMessage },
+          ],
+          model: FALLBACK_MODEL,
+          temperature: 0.7,
+          max_tokens: 1200,
+        });
+        return fallbackCompletion.choices[0]?.message?.content || 'Fallback failed.';
+      } catch (fallbackError) {
+        console.error('Groq Fallback Error:', fallbackError);
+        return 'The AI service is currently overwhelmed. Please wait a moment and try again.';
+      }
+    }
     return 'I encountered an error processing your request. Please try again.';
   }
 }
@@ -258,21 +314,44 @@ export async function streamAIResponse(
   userMessage: string,
   userProfile: any,
   conversationHistory: Array<{ role: any; content: string }> = [],
-  currentStage: number = 2
+  currentStage: number = 2,
+  persona: string = 'standard'
 ) {
-  const systemPrompt = await buildSystemPrompt(userProfile, currentStage);
+  const systemPrompt = await buildSystemPrompt(userProfile, currentStage, persona);
 
-  const stream = await groq.chat.completions.create({
-    messages: [
-      { role: 'system', content: systemPrompt },
-      ...conversationHistory as any[],
-      { role: 'user', content: userMessage },
-    ],
-    model: 'llama-3.3-70b-versatile',
-    temperature: 0.7,
-    max_tokens: 1200,
-    stream: true,
-  });
-
-  return stream;
+  try {
+    const stream = await groq.chat.completions.create({
+      messages: [
+        { role: 'system', content: systemPrompt },
+        ...conversationHistory as any[],
+        { role: 'user', content: userMessage },
+      ],
+      model: DEFAULT_MODEL,
+      temperature: 0.7,
+      max_tokens: 1200,
+      stream: true,
+    });
+    return stream;
+  } catch (error: any) {
+    if (error?.status === 429) {
+      console.log('Falling back to 8B model due to rate limit...');
+      try {
+        return await groq.chat.completions.create({
+          messages: [
+            { role: 'system', content: systemPrompt },
+            ...conversationHistory as any[],
+            { role: 'user', content: userMessage },
+          ],
+          model: FALLBACK_MODEL,
+          temperature: 0.7,
+          max_tokens: 1200,
+          stream: true,
+        });
+      } catch (fallbackError) {
+        console.error('Groq Fallback Streaming Error:', fallbackError);
+        throw fallbackError;
+      }
+    }
+    throw error;
+  }
 }

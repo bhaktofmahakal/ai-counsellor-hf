@@ -15,9 +15,13 @@ import {
   Menu,
   X,
   Sparkles,
-  FileText
+  FileText,
+  Bookmark,
+  FileCheck
 } from 'lucide-react';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/lightswind/avatar';
+import { Button } from '@/components/lightswind/button';
+import { Card } from '@/components/lightswind/card';
 
 export default function DashboardLayout({
   children,
@@ -28,6 +32,7 @@ export default function DashboardLayout({
   const router = useRouter();
   const { data: session, status } = useSession();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [isDataLoaded, setIsDataLoaded] = useState(false);
   const {
     user,
@@ -36,6 +41,7 @@ export default function DashboardLayout({
     updateUser,
     setUniversities,
     setTasks,
+    shortlistedIds,
     setShortlistedIds,
     setStage,
     lockUniversity,
@@ -62,9 +68,20 @@ export default function DashboardLayout({
     // 2. Onboarding check: if not onboarded and not on onboarding page, redirect
     // Use both store and session as source of truth to be resilient
     const isOnboardingCompleted = user.onboardingCompleted || (session?.user as any)?.onboardingCompleted;
+    const isActuallyLoaded = isDataLoaded && (user.email === session?.user?.email);
 
-    if (isDataLoaded && !isOnboardingCompleted && pathname !== '/dashboard/onboarding') {
-      router.push('/dashboard/onboarding');
+    // FIX: Only redirect if we are SURE about the onboarding status
+    if (status === 'authenticated' && isActuallyLoaded) {
+      if (!isOnboardingCompleted && pathname !== '/dashboard/onboarding') {
+        console.log('🚀 [DashboardLayout] Redirecting to onboarding');
+        router.replace('/dashboard/onboarding');
+        return;
+      }
+      if (isOnboardingCompleted && pathname === '/dashboard/onboarding') {
+        console.log('✅ [DashboardLayout] Already onboarded, moving to dashboard');
+        router.replace('/dashboard');
+        return;
+      }
     }
   }, [status, isAuthenticated, user.onboardingCompleted, (session?.user as any)?.onboardingCompleted, pathname, router, isDataLoaded]);
 
@@ -117,7 +134,8 @@ export default function DashboardLayout({
           }
         } else if (userRes.status === 404) {
           // New user or not found, proceed to onboarding naturally
-          console.log('ℹ️ [DashboardLayout] User not found, may need onboarding');
+          console.log('ℹ️ [DashboardLayout] User not found, initializing store with session data');
+          updateUser({ email: activeEmail, name: session.user.name || 'Student' });
         } else if (userRes.status === 401) {
           console.error('❌ [DashboardLayout] User API failed: 401 Unauthorized. Session may be invalid.');
           logout();
@@ -127,7 +145,8 @@ export default function DashboardLayout({
         }
 
         if (universitiesRes.ok) {
-          setUniversities(await universitiesRes.json());
+          const unis = await universitiesRes.json();
+          setUniversities(Array.isArray(unis) ? unis : []);
         }
       } catch (error) {
         console.error('❌ [DashboardLayout] Data loading error:', error);
@@ -142,8 +161,16 @@ export default function DashboardLayout({
   }, [session?.user?.email, status, isDataLoaded]);
 
   const isOnboarding = pathname === '/dashboard/onboarding';
+  const isOnboardingCompleted = user.onboardingCompleted || (session?.user as any)?.onboardingCompleted;
 
-  if (status === 'loading') {
+  // Robust loading check: must be hydrated AND (data loaded for the CURRENT session user)
+  const isCorrectUserLoaded = isDataLoaded && user.email === session?.user?.email;
+  const isActuallyLoaded = _hasHydrated && (status === 'authenticated' ? isCorrectUserLoaded : true);
+
+  const isRedirecting = status === 'authenticated' && isActuallyLoaded && !isOnboardingCompleted && !isOnboarding;
+  const isRedirectingAway = status === 'authenticated' && isActuallyLoaded && isOnboardingCompleted && isOnboarding;
+
+  if (status === 'loading' || !_hasHydrated || (status === 'authenticated' && !isActuallyLoaded) || isRedirecting || isRedirectingAway) {
     return (
       <div className="min-h-screen bg-slate-950 flex items-center justify-center">
         <div className="h-8 w-8 rounded-full border-2 border-blue-600 border-t-transparent animate-spin" />
@@ -161,10 +188,12 @@ export default function DashboardLayout({
 
   const navigation = [
     { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
+    { name: 'Profile', href: '/dashboard/profile', icon: User },
     { name: 'Universities', href: '/dashboard/universities', icon: GraduationCap },
+    { name: 'Shortlist', href: '/dashboard/shortlist', icon: Bookmark },
+    { name: 'Tasks & Guidance', href: '/dashboard/tasks', icon: CheckSquare },
     { name: 'Documents', href: '/dashboard/documents', icon: FileText },
     { name: 'AI Counsellor', href: '/dashboard/ai-counsellor', icon: MessageSquare },
-    { name: 'Tasks', href: '/dashboard/tasks', icon: CheckSquare },
   ];
 
   return (
@@ -212,6 +241,7 @@ export default function DashboardLayout({
             <nav className="flex-1 space-y-2">
               {navigation.map((item) => {
                 const isActive = pathname === item.href;
+                const showBadge = item.name === 'Shortlist' && shortlistedIds.length > 0;
                 return (
                   <Link
                     key={item.name}
@@ -227,6 +257,11 @@ export default function DashboardLayout({
                     )}
                     <item.icon className={`h-5 w-5 relative z-10 transition-colors ${isActive ? 'text-blue-400' : 'group-hover:text-blue-400'}`} />
                     <span className="relative z-10 font-medium">{item.name}</span>
+                    {showBadge && (
+                      <span className="relative z-10 ml-auto px-2 py-0.5 bg-yellow-500 text-slate-900 text-xs font-bold rounded-full">
+                        {shortlistedIds.length}
+                      </span>
+                    )}
                     {isActive && (
                       <div className="absolute right-2 h-1.5 w-1.5 rounded-full bg-blue-600 shadow-[0_0_8px_rgba(37,99,235,0.6)]" />
                     )}
@@ -269,10 +304,7 @@ export default function DashboardLayout({
                     <p className="text-xs text-slate-500 truncate">{user.email || 'john@example.com'}</p>
                   </div>
                   <button
-                    onClick={async () => {
-                      logout();
-                      await signOut({ callbackUrl: '/' });
-                    }}
+                    onClick={() => setShowLogoutModal(true)}
                     className="text-slate-500 hover:text-blue-400 transition-colors"
                   >
                     <LogOut className="h-4 w-4" />
@@ -283,12 +315,48 @@ export default function DashboardLayout({
           </div>
         </aside>
 
-        <main className="flex-1 p-4 lg:p-6 overflow-y-auto">
-          <div className="max-w-6xl mx-auto space-y-4">
+        <main className={`flex-1 overflow-y-auto ${pathname === '/dashboard/ai-counsellor' ? 'p-0' : 'p-3 sm:p-4 lg:p-6'}`}>
+          <div className={`${pathname === '/dashboard/ai-counsellor' ? 'max-w-full h-full' : 'max-w-6xl space-y-4'} mx-auto`}>
             {children}
           </div>
         </main>
       </div>
+
+      {/* Logout Confirmation Modal */}
+      {showLogoutModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+          <Card className="max-w-md w-full p-8 bg-slate-900 border-white/10 shadow-2xl relative overflow-hidden">
+            <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-red-500 to-amber-500" />
+            <div className="text-center">
+              <div className="w-16 h-16 bg-red-500/10 rounded-full flex items-center justify-center mx-auto mb-4">
+                <LogOut className="w-8 h-8 text-red-500" />
+              </div>
+              <h3 className="text-2xl font-bold text-white mb-2">Logout</h3>
+              <p className="text-slate-400 mb-8">
+                Are you sure you want to log out of AI Counsellor? Your progress is saved.
+              </p>
+              <div className="flex gap-3">
+                <Button
+                  onClick={() => setShowLogoutModal(false)}
+                  variant="outline"
+                  className="flex-1 border-white/10 hover:bg-white/5"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  onClick={async () => {
+                    logout();
+                    await signOut({ callbackUrl: '/' });
+                  }}
+                  className="flex-1 bg-red-600 hover:bg-red-700 text-white shadow-lg shadow-red-600/20"
+                >
+                  Logout
+                </Button>
+              </div>
+            </div>
+          </Card>
+        </div>
+      )}
     </div>
   );
 }

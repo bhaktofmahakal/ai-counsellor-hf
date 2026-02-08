@@ -15,19 +15,27 @@ const SHORTLIST_TASKS = [
 export async function GET(request: NextRequest) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session?.user?.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    if (!session?.user?.email) {
+      console.warn('⚠️ [API/Shortlist] GET: No session email found');
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
 
     const user = await prisma.user.findUnique({ where: { email: session.user.email } });
-    if (!user) return NextResponse.json({ error: 'User not found' }, { status: 404 });
+    if (!user) {
+      console.error(`❌ [API/Shortlist] GET: User not found for email: ${session.user.email}`);
+      return NextResponse.json({ error: 'User not found in database' }, { status: 404 });
+    }
 
     const shortlists = await prisma.shortlist.findMany({
       where: { userId: user.id },
       include: { university: true },
     });
 
+    console.log(`✅ [API/Shortlist] GET: Fetched ${shortlists.length} items for ${user.email}`);
     return NextResponse.json(shortlists);
-  } catch (error) {
-    return NextResponse.json({ error: 'Failed to fetch shortlists' }, { status: 500 });
+  } catch (error: any) {
+    console.error('❌ [API/Shortlist] GET Error:', error);
+    return NextResponse.json({ error: 'Failed to fetch shortlists', details: error.message }, { status: 500 });
   }
 }
 
@@ -39,7 +47,7 @@ export async function POST(request: NextRequest) {
     const user = await prisma.user.findUnique({ where: { email: session.user.email } });
     if (!user) return NextResponse.json({ error: 'User not found' }, { status: 404 });
 
-    const { universityId, ...updateData } = await request.json();
+    const { universityId, universityData, ...updateData } = await request.json();
     if (!universityId) return NextResponse.json({ error: 'University ID is required' }, { status: 400 });
 
     const existing = await prisma.shortlist.findUnique({
@@ -49,18 +57,47 @@ export async function POST(request: NextRequest) {
 
     if (existing) {
       await prisma.shortlist.delete({ where: { id: existing.id } });
-      const uniName = existing.university?.name || '';
-      await prisma.task.deleteMany({
-        where: { userId: user.id, title: { contains: uniName } },
-      });
+      const uniName = existing.university?.name;
+      if (uniName) {
+        await prisma.task.deleteMany({
+          where: { userId: user.id, title: { contains: uniName } },
+        });
+      }
       return NextResponse.json({ action: 'removed', shortlist: existing });
     } else {
       let university = await prisma.university.findUnique({ where: { id: universityId } });
 
       // Handle external university materialization
-      if (!university && universityId.startsWith('ext-') && updateData.universityData) {
-        const { id, matchScore, ...cleanData } = updateData.universityData;
-        university = await prisma.university.create({ data: cleanData });
+      if (!university && universityId.startsWith('ext-') && universityData) {
+        const u = universityData;
+
+        // Whitelist allowed fields to prevent mass-assignment
+        const sanitizedData = {
+          name: u.name,
+          location: u.location,
+          country: u.country,
+          rank: u.rank,
+          tuition: u.tuition || 0,
+          acceptanceRate: u.acceptanceRate,
+          description: u.description,
+          website: u.website,
+          domain: u.domain,
+          tags: Array.isArray(u.tags) ? u.tags : [],
+          programs: Array.isArray(u.programs) ? u.programs : [],
+          strengths: Array.isArray(u.strengths) ? u.strengths : [],
+          risks: Array.isArray(u.risks) ? u.risks : [],
+        };
+
+        if (!sanitizedData.name || !sanitizedData.country) {
+          return NextResponse.json({ error: 'Missing required university data' }, { status: 400 });
+        }
+
+        university = await prisma.university.create({
+          data: {
+            ...sanitizedData,
+            id: universityId
+          }
+        });
       }
 
       if (!university) return NextResponse.json({ error: 'University not found' }, { status: 404 });
@@ -79,7 +116,7 @@ export async function POST(request: NextRequest) {
           priority: task.priority,
           stage: task.stage,
           completed: false,
-          due: dueDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+          due: dueDate.toISOString(),
         };
       });
 

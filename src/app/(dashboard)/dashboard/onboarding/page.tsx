@@ -20,6 +20,7 @@ type OnboardingFormData = {
   education: string;
   degree: string;
   gpa: string;
+  gpaScale: '4' | '10' | 'percentage';
   studyGoal: string;
   preferredCountries: string[];
   budgetMin: string;
@@ -56,8 +57,8 @@ export default function OnboardingPage() {
 
     const cleanSpeechText = text
       .replace(/[*#_`~]/g, '')
-      .replace(/\[ACTION:.*?\]/g, '')
-      .replace(/\[DATA:.*?\]/g, '')
+      .replace(/\[ACTION:[\s\S]*?\]/gi, '')
+      .replace(/\[DATA:[\s\S]*?\{[\s\S]*?\}\s*\]/gi, '')
       .replace(/=/g, ' is ')
       .trim();
 
@@ -149,6 +150,7 @@ export default function OnboardingPage() {
     education: user.education || '',
     degree: user.degree || '',
     gpa: user.gpa || '',
+    gpaScale: '4', // Default to 4.0 scale
     studyGoal: user.studyGoal || '',
     preferredCountries: user.preferredCountries || [],
     budgetMin: user.budgetMin ? user.budgetMin.toString() : '',
@@ -177,21 +179,33 @@ export default function OnboardingPage() {
     }
   };
 
-  const validateStep = (step: number) => {
+  const validateStep = (step: number, all = false) => {
     const newErrors: Record<string, string> = {};
-    if (step === 0) {
+
+    // Validate Academic Background (Step 0)
+    if (all || step === 0) {
       if (!data.education) newErrors.education = 'Required';
       if (!data.degree) newErrors.degree = 'Required';
       if (!data.gpa) newErrors.gpa = 'Required';
-    } else if (step === 1) {
+    }
+
+    // Validate Study Goals (Step 1)
+    if (all || step === 1) {
       if (!data.studyGoal) newErrors.studyGoal = 'Required';
       if (data.preferredCountries.length === 0) newErrors.preferredCountries = 'Select at least one country';
-    } else if (step === 2) {
+    }
+
+    // Validate Budget (Step 2)
+    if (all || step === 2) {
       if (!data.budgetMin) newErrors.budgetMin = 'Required';
       if (!data.budgetMax) newErrors.budgetMax = 'Required';
-    } else if (step === 3) {
+    }
+
+    // Validate Exams (Step 3)
+    if (all || step === 3) {
       if (!data.examStatus) newErrors.examStatus = 'Required';
     }
+
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -211,7 +225,25 @@ export default function OnboardingPage() {
   };
 
   const handleComplete = async () => {
-    if (!validateStep(3)) return;
+    let isValid = false;
+
+    if (mode === 'form') {
+      isValid = validateStep(3, true);
+    } else {
+      // AI Mode: Perform minimal critical-data check
+      isValid = !!(data.education && data.studyGoal && data.preferredCountries.length > 0);
+      if (!isValid) {
+        // Fallback to full validation to show specific errors
+        isValid = validateStep(3, true);
+      }
+    }
+
+    if (!isValid) {
+      toast.error('Missing Profile Information', {
+        description: 'Please complete or verify your information before proceeding.'
+      });
+      return;
+    }
 
     setIsTyping(true); // Show loading state
 
@@ -287,28 +319,54 @@ export default function OnboardingPage() {
             if (dataStr === '[DONE]') {
               setIsTyping(false);
 
-              // Handle data extraction
-              const dataMatch = accumulatedContent.match(/\[DATA:\s*({[^\]]+})\]/);
+              // Handle data extraction with a more robust multi-line regex
+              const dataMatch = accumulatedContent.match(/\[DATA:\s*(\{[\s\S]*?\})\s*\]/m);
+
               if (dataMatch) {
                 try {
                   const extractedData = JSON.parse(dataMatch[1]);
                   console.log('Parsed AI Onboarding Data:', extractedData);
 
                   // Update form data with extracted info
-                  setData(prev => ({
-                    ...prev,
-                    ...extractedData,
-                    budgetMax: extractedData.budgetMax?.toString() || prev.budgetMax,
-                    preferredCountries: extractedData.preferredCountries || prev.preferredCountries,
-                  }));
+                  setData(prev => {
+                    const newData = {
+                      ...prev,
+                      ...extractedData,
+                      budgetMax: extractedData.budgetMax?.toString() || prev.budgetMax,
+                      preferredCountries: extractedData.preferredCountries || prev.preferredCountries,
+                    };
 
-                  setAiStep(6); // Finalize
+                    // BACKGROUND SAVE: Persist AI findings immediately
+                    fetch('/api/user', {
+                      method: 'PATCH',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        email: user.email,
+                        ...extractedData,
+                        budgetMin: parseInt(extractedData.budgetMin || prev.budgetMin) || 0,
+                        budgetMax: parseInt(extractedData.budgetMax || prev.budgetMax) || 0,
+                      }),
+                    }).catch(err => console.error('Silent background save failed:', err));
+
+                    return newData;
+                  });
+
+                  setAiStep(6); // Finalize and show "Enter Mission Control"
                 } catch (e) {
                   console.error('Error parsing extracted data:', e);
                 }
+              } else if (
+                aiMessages.length > 6 && // Minimum conversation turns
+                (accumulatedContent.toLowerCase().includes('mission control complete') ||
+                  accumulatedContent.toLowerCase().includes('onboarding complete') ||
+                  accumulatedContent.toLowerCase().includes('all set')) &&
+                data.education && data.studyGoal && data.preferredCountries.length > 0
+              ) {
+                // Safety fallback: only if we have the critical data and specific phrases
+                setAiStep(6);
               }
 
-              const textToSpeak = accumulatedContent.replace(/\[DATA:\s*({[^\]]+})\]/, '').trim();
+              const textToSpeak = accumulatedContent.replace(/\[DATA:[\s\S]*?\{[\s\S]*?\}\s*\]/gi, '').trim();
               speak(textToSpeak);
               break;
             }
@@ -377,18 +435,34 @@ export default function OnboardingPage() {
             {errors.degree && <p className="mt-1 text-xs text-red-500">{errors.degree}</p>}
           </div>
 
-          <div>
-            <label className="block text-sm font-medium text-slate-400 mb-2">
-              GPA / Percentage <span className="text-red-500">*</span>
-            </label>
-            <Input
-              type="text"
-              placeholder="e.g., 3.8 / 85%"
-              value={data.gpa}
-              onChange={(e) => updateField('gpa', e.target.value)}
-              className={`w-full bg-slate-900/50 ${errors.gpa ? 'border-red-500' : 'border-white/10'} text-white`}
-            />
-            {errors.gpa && <p className="mt-1 text-xs text-red-500">{errors.gpa}</p>}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-slate-400 mb-2">
+                GPA / Percentage <span className="text-red-500">*</span>
+              </label>
+              <Input
+                type="text"
+                placeholder={data.gpaScale === 'percentage' ? "e.g., 85" : "e.g., 3.8"}
+                value={data.gpa}
+                onChange={(e) => updateField('gpa', e.target.value)}
+                className={`w-full bg-slate-900/50 ${errors.gpa ? 'border-red-500' : 'border-white/10'} text-white`}
+              />
+              {errors.gpa && <p className="mt-1 text-xs text-red-500">{errors.gpa}</p>}
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-400 mb-2">
+                Scale
+              </label>
+              <select
+                value={data.gpaScale}
+                onChange={(e) => updateField('gpaScale', e.target.value as any)}
+                className="w-full px-3 py-2 bg-slate-900/50 border border-white/10 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-600/50"
+              >
+                <option value="4">4.0 Scale</option>
+                <option value="10">10.0 Scale</option>
+                <option value="percentage">Percentage (%)</option>
+              </select>
+            </div>
           </div>
         </div>
       ),
@@ -638,7 +712,7 @@ export default function OnboardingPage() {
                         ? 'bg-slate-900/50 text-slate-200 border border-white/5 rounded-tl-sm'
                         : 'bg-blue-600 text-white rounded-tr-sm'
                         }`}>
-                        {msg.content.replace(/\[DATA:\s*({[^\]]+})\]/, '').trim()}
+                        {msg.content.replace(/\[DATA:[\s\S]*?\{[\s\S]*?\}\s*\]/gi, '').trim()}
                       </div>
                     </div>
                   ))}

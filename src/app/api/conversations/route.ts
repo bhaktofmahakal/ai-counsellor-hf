@@ -87,19 +87,25 @@ export async function DELETE(request: NextRequest) {
     const searchParams = request.nextUrl.searchParams;
     const sessionId = searchParams.get('sessionId');
 
-    if (!sessionId) {
-      return NextResponse.json({ error: 'Session ID is required' }, { status: 400 });
+    if (sessionId) {
+      // Delete specific session
+      await prisma.conversation.deleteMany({
+        where: {
+          userId: user.id,
+          sessionId: sessionId
+        }
+      });
+      return NextResponse.json({ success: true, message: 'Session deleted' });
+    } else {
+      // Clear ALL history for this user
+      await prisma.conversation.deleteMany({
+        where: {
+          userId: user.id
+        }
+      });
+      return NextResponse.json({ success: true, message: 'All history cleared' });
     }
-
-    await prisma.conversation.deleteMany({
-      where: {
-        userId: user.id,
-        sessionId: sessionId
-      }
-    });
-
-    return NextResponse.json({ success: true, message: 'Session deleted' });
   } catch (error) {
-    return NextResponse.json({ error: 'Failed to delete session' }, { status: 500 });
+    return NextResponse.json({ error: 'Failed to delete' }, { status: 500 });
   }
 }

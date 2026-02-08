@@ -5,29 +5,34 @@ import { Card } from '@/components/lightswind/card';
 import { Input } from '@/components/lightswind/input';
 import { useAppStore } from '@/lib/store';
 import { GradientButton } from '@/components/lightswind/gradient-button';
+import { calculateProfileStrength, getProfileCompletionItems } from '@/lib/utils/profile';
 import { Badge } from '@/components/lightswind/badge';
 import { User, Mail, GraduationCap, DollarSign, FileText, CheckCircle, Camera, X } from 'lucide-react';
 import { toast } from 'sonner';
-import { getProfileCompletionItems, calculateProfileStrength } from '@/lib/utils/profile';
 
 export default function ProfilePage() {
-  const { user, updateUser } = useAppStore();
+  const { user, updateUser, currentStage } = useAppStore();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const docInputRef = useRef<HTMLInputElement>(null);
   const [profileImage, setProfileImage] = useState<string | null>(null);
+  const [uploadingDoc, setUploadingDoc] = useState<{ id: string, name: string } | null>(null);
   const [profileData, setProfileData] = useState({
     name: '',
     email: '',
     education: '',
     degree: '',
     gpa: '',
+    gpaScale: '10.0',
     studyGoal: '',
+    targetField: '',
+    targetIntake: '',
+    fundingPlan: '',
+    preferredCountries: '',
     budgetMin: '',
     budgetMax: '',
     examStatus: '',
     examScores: '',
-    fundingPlan: '',
-    sopStatus: '',
-    targetIntake: '',
+    sopStatus: '', // Added to avoid missing field in logic
   });
 
   useEffect(() => {
@@ -38,19 +43,91 @@ export default function ProfilePage() {
         education: user.education || '',
         degree: user.degree || '',
         gpa: user.gpa || '',
+        gpaScale: user.gpaScale || '10.0',
         studyGoal: user.studyGoal || '',
+        targetField: user.targetField || '',
+        targetIntake: user.targetIntake || '',
+        fundingPlan: user.fundingPlan || '',
+        preferredCountries: user.preferredCountries?.join(', ') || '',
         budgetMin: user.budgetMin?.toString() || '',
         budgetMax: user.budgetMax?.toString() || '',
         examStatus: user.examStatus || '',
         examScores: user.examScores || '',
-        fundingPlan: user.fundingPlan || '',
         sopStatus: user.sopStatus || '',
-        targetIntake: user.targetIntake || '',
       });
       setProfileImage(user.avatar || null);
     }
   }, [user]);
 
+  const [documents, setDocuments] = useState<any[]>([]);
+  const [loadingDocs, setLoadingDocs] = useState(true);
+
+  useEffect(() => {
+    fetchDocuments();
+  }, []);
+
+  const fetchDocuments = async () => {
+    try {
+      const res = await fetch('/api/documents');
+      if (res.ok) {
+        const data = await res.json();
+        setDocuments(data);
+      }
+    } catch (e) {
+      console.error('Error fetching documents:', e);
+    } finally {
+      setLoadingDocs(false);
+    }
+  };
+
+  const handleUploadClick = (docType: string, docName: string) => {
+    setUploadingDoc({ id: docType, name: docName });
+    if (docInputRef.current) {
+      docInputRef.current.value = ''; // Reset to allow same file re-upload
+      docInputRef.current.click();
+    }
+  };
+
+  const handleDocFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !uploadingDoc) return;
+
+    const docType = uploadingDoc.id;
+    const docName = uploadingDoc.name;
+
+    toast.promise(
+      async () => {
+        const reader = new FileReader();
+        const contentPromise = new Promise<string>((resolve) => {
+          reader.onload = () => resolve(reader.result as string);
+          reader.readAsDataURL(file); // Use DataURL for all file types (PDF, Doc, etc)
+        });
+        
+        const fileContent = await contentPromise;
+        const res = await fetch('/api/documents', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title: `${docName} - ${file.name}`,
+            type: docType,
+            content: fileContent, // Base64 content
+            status: 'ready'
+          }),
+        });
+        if (!res.ok) throw new Error('Failed to upload');
+        await fetchDocuments();
+      },
+      {
+        loading: `Uploading ${file.name}...`,
+        success: `${file.name} uploaded successfully!`,
+        error: `Failed to upload ${file.name}`,
+      }
+    );
+  };
+
+  const getDocStatus = (type: string) => {
+    return documents.some(d => d.type.toUpperCase() === type.toUpperCase()) ? 'uploaded' : 'missing';
+  };
   const [isSaving, setIsSaving] = useState(false);
 
   const handleSave = async () => {
@@ -62,6 +139,7 @@ export default function ProfilePage() {
         body: JSON.stringify({
           email: profileData.email,
           ...profileData,
+          preferredCountries: profileData.preferredCountries.split(',').map(c => c.trim()).filter(Boolean),
           budgetMin: parseInt(profileData.budgetMin) || 0,
           budgetMax: parseInt(profileData.budgetMax) || 0,
           avatar: profileImage
@@ -94,8 +172,18 @@ export default function ProfilePage() {
     }
   };
 
-  const completionItems = getProfileCompletionItems(profileData);
-  const completionPercentage = calculateProfileStrength(profileData);
+  // Use centralized logic for consistency
+  const completionItems = getProfileCompletionItems({
+    ...profileData,
+    budgetMax: parseInt(profileData.budgetMax) || 0,
+    preferredCountries: profileData.preferredCountries.split(',').map(c => c.trim()).filter(Boolean)
+  });
+
+  const completionPercentage = calculateProfileStrength({
+    ...profileData,
+    budgetMax: parseInt(profileData.budgetMax) || 0,
+    preferredCountries: profileData.preferredCountries.split(',').map(c => c.trim()).filter(Boolean)
+  });
 
   const initials = profileData.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2) || 'JD';
 
@@ -145,6 +233,13 @@ export default function ProfilePage() {
             onChange={handlePhotoChange}
             className="hidden"
             accept="image/*"
+          />
+          <input
+            type="file"
+            ref={docInputRef}
+            onChange={handleDocFileChange}
+            className="hidden"
+            accept=".pdf,.doc,.docx,.txt"
           />
           <GradientButton
             variant="outline"
@@ -231,14 +326,63 @@ export default function ProfilePage() {
               className="w-full bg-slate-950/50 border-white/10 text-white focus:border-blue-600/50"
             />
           </div>
+          <div className="flex gap-4">
+            <div className="flex-1">
+              <label className="block text-sm font-medium text-slate-400 mb-2">
+                GPA / Percentage
+              </label>
+              <Input
+                value={profileData.gpa}
+                onChange={(e) => updateField('gpa', e.target.value)}
+                className="w-full bg-slate-950/50 border-white/10 text-white focus:border-blue-600/50"
+              />
+            </div>
+            <div className="w-32">
+              <label className="block text-sm font-medium text-slate-400 mb-2">
+                Scale
+              </label>
+              <select
+                value={profileData.gpaScale}
+                onChange={(e) => updateField('gpaScale', e.target.value)}
+                className="w-full px-3 py-2 bg-slate-950/50 border border-white/10 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-600/50 text-white"
+              >
+                <option value="4.0" className="bg-slate-950">4.0</option>
+                <option value="10.0" className="bg-slate-950">10.0</option>
+                <option value="100" className="bg-slate-950">100%</option>
+              </select>
+            </div>
+          </div>
           <div>
             <label className="block text-sm font-medium text-slate-400 mb-2">
-              GPA / Percentage
+              Target Field of Study (e.g. CS, AI, Finance)
             </label>
             <Input
-              value={profileData.gpa}
-              onChange={(e) => updateField('gpa', e.target.value)}
+              value={profileData.targetField}
+              onChange={(e) => updateField('targetField', e.target.value)}
               className="w-full bg-slate-950/50 border-white/10 text-white focus:border-blue-600/50"
+              placeholder="e.g. Computer Science"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-400 mb-2">
+              Preferred Countries (comma separated)
+            </label>
+            <Input
+              value={profileData.preferredCountries}
+              onChange={(e) => updateField('preferredCountries', e.target.value)}
+              className="w-full bg-slate-950/50 border-white/10 text-white focus:border-blue-600/50"
+              placeholder="e.g. USA, Canada, Germany"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-400 mb-2">
+              Target Intake (e.g. Fall 2025)
+            </label>
+            <Input
+              value={profileData.targetIntake}
+              onChange={(e) => updateField('targetIntake', e.target.value)}
+              className="w-full bg-slate-950/50 border-white/10 text-white focus:border-blue-600/50"
+              placeholder="e.g. Fall 2025"
             />
           </div>
           <div>
@@ -256,21 +400,6 @@ export default function ProfilePage() {
               <option value="certificate" className="bg-slate-950">Certificate Program</option>
             </select>
           </div>
-          <div>
-            <label className="block text-sm font-medium text-slate-400 mb-2">
-              Target Intake Year
-            </label>
-            <select
-              value={profileData.targetIntake}
-              onChange={(e) => updateField('targetIntake', e.target.value)}
-              className="w-full px-3 py-2 bg-slate-950/50 border border-white/10 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-600/50 text-white"
-            >
-              <option value="" className="bg-slate-950">Select Intake</option>
-              <option value="fall-2026" className="bg-slate-950">Fall 2026</option>
-              <option value="spring-2027" className="bg-slate-950">Spring 2027</option>
-              <option value="fall-2027" className="bg-slate-950">Fall 2027</option>
-            </select>
-          </div>
         </div>
       </Card>
 
@@ -280,6 +409,21 @@ export default function ProfilePage() {
           Budget Planning
         </h3>
         <div className="grid md:grid-cols-2 gap-6">
+          <div>
+            <label className="block text-sm font-medium text-slate-400 mb-2">
+              Funding Plan
+            </label>
+            <select
+              value={profileData.fundingPlan}
+              onChange={(e) => updateField('fundingPlan', e.target.value)}
+              className="w-full px-3 py-2 bg-slate-950/50 border border-white/10 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-600/50 text-white"
+            >
+              <option value="Self-funded" className="bg-slate-950">Self-funded</option>
+              <option value="Scholarship" className="bg-slate-950">Scholarship</option>
+              <option value="Loan" className="bg-slate-950">Educational Loan</option>
+              <option value="Sponsorship" className="bg-slate-950">Company Sponsorship</option>
+            </select>
+          </div>
           <div>
             <label className="block text-sm font-medium text-slate-400 mb-2">
               Minimum Budget (USD/year)
@@ -301,21 +445,6 @@ export default function ProfilePage() {
               onChange={(e) => updateField('budgetMax', e.target.value)}
               className="w-full bg-slate-950/50 border-white/10 text-white focus:border-blue-600/50"
             />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-slate-400 mb-2">
-              Funding Plan
-            </label>
-            <select
-              value={profileData.fundingPlan}
-              onChange={(e) => updateField('fundingPlan', e.target.value)}
-              className="w-full px-3 py-2 bg-slate-950/50 border border-white/10 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-600/50 text-white"
-            >
-              <option value="" className="bg-slate-950">Select Funding</option>
-              <option value="self-funded" className="bg-slate-950">Self-funded</option>
-              <option value="scholarship" className="bg-slate-950">Scholarship-dependent</option>
-              <option value="loan" className="bg-slate-950">Loan-dependent</option>
-            </select>
           </div>
         </div>
       </Card>
@@ -343,21 +472,6 @@ export default function ProfilePage() {
           </div>
           <div>
             <label className="block text-sm font-medium text-slate-400 mb-2">
-              SOP Status
-            </label>
-            <select
-              value={profileData.sopStatus}
-              onChange={(e) => updateField('sopStatus', e.target.value)}
-              className="w-full px-3 py-2 bg-slate-950/50 border border-white/10 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-600/50 text-white"
-            >
-              <option value="not-started" className="bg-slate-950">Not started</option>
-              <option value="drafting" className="bg-slate-950">Drafting</option>
-              <option value="reviewing" className="bg-slate-950">Reviewing</option>
-              <option value="ready" className="bg-slate-950">Ready</option>
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-slate-400 mb-2">
               Exam Scores
             </label>
             <Input
@@ -369,6 +483,52 @@ export default function ProfilePage() {
           </div>
         </div>
       </Card>
+
+      {/* Documents Vault */}
+      <Card className="p-6 bg-white/5 backdrop-blur-xl border-white/10">
+        <h3 className="text-lg font-bold text-white mb-6 flex items-center gap-2 font-display">
+          <FileText className="h-5 w-5 text-indigo-400" />
+          Documents Vault
+        </h3>
+        <div className="space-y-4">
+          {[
+            { id: 'RESUME', name: 'Resume / CV' },
+            { id: 'SOP', name: 'Statement of Purpose' },
+            { id: 'TRANSCRIPT', name: 'Transcripts' },
+          ].map((doc, idx) => {
+            const status = getDocStatus(doc.id);
+            return (
+              <div key={idx} className="flex flex-col gap-2 p-4 bg-slate-950/50 border border-white/5 rounded-xl">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <FileText className={`w-5 h-5 ${status === 'uploaded' ? 'text-indigo-400' : 'text-slate-600'}`} />
+                    <span className="text-white font-medium">{doc.name}</span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <Badge className={status === 'uploaded' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-amber-500/10 text-amber-500 border border-amber-500/20'}>
+                      {status === 'uploaded' ? 'UPLOADED' : 'MISSING'}
+                    </Badge>
+                    <button
+                      type="button"
+                      onClick={() => handleUploadClick(doc.id, doc.name)}
+                      className="px-3 py-1 bg-white/5 hover:bg-white/10 text-xs font-bold text-slate-300 rounded-lg border border-white/5 transition-all outline-none focus:ring-2 focus:ring-indigo-500/50"
+                    >
+                      {status === 'uploaded' ? 'REPLACE' : 'UPLOAD'}
+                    </button>
+                  </div>
+                </div>
+                <p className="text-[10px] text-slate-500 italic pl-8">
+                  {status === 'uploaded' ? "File stored in your vault. AI will use this for analysis." : "Click Upload to select a file from your computer."}
+                </p>
+              </div>
+            );
+          })}
+        </div>
+        <p className="text-[10px] text-slate-500 mt-4 leading-relaxed">
+          *Note: Documents are used by AI to analyze your application strength and provide specific feedback on essays.
+        </p>
+      </Card>
+
 
       <div className="flex gap-4">
         <GradientButton
@@ -383,6 +543,6 @@ export default function ProfilePage() {
           Cancel
         </GradientButton>
       </div>
-    </div >
+    </div>
   );
 }

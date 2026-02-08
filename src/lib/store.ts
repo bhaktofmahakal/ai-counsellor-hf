@@ -8,6 +8,7 @@ export type UserProfile = {
   education: string;
   degree: string;
   gpa: string;
+  gpaScale?: string;
   studyGoal: string; // Bachelors, Masters, etc.
   targetField: string; // CS, Business, etc. (derived from degree usually)
   preferredCountries: string[];
@@ -38,6 +39,9 @@ export type University = {
   strengths: string[];
   website?: string;
   domain?: string;
+  costOfLiving?: number;
+  avgSalary?: number;
+  deadlines?: string;
 };
 
 export type Task = {
@@ -90,6 +94,7 @@ interface AppState {
   setTasks: (tasks: Task[]) => void;
   addTask: (task: Task) => void;
   toggleTask: (id: string) => void;
+  deleteTask: (id: string) => void;
 
   // Computed helpers (not state, but accessible via getters if needed, here we just keep state)
   reset: () => void;
@@ -144,10 +149,14 @@ export const useAppStore = create<AppState>()(
 
       completeOnboarding: () => set((state) => ({
         user: { ...state.user, onboardingCompleted: true },
-        currentStage: 2 // Move to discovery automatically
+        currentStage: 2, // Move to discovery automatically
+        tasks: state.tasks.map(t => t.stage === 1 ? { ...t, completed: true } : t)
       })),
 
-      setStage: (stage) => set({ currentStage: stage }),
+      setStage: (stage) => set((state) => ({ 
+        currentStage: stage,
+        tasks: state.tasks.map(t => t.stage < stage ? { ...t, completed: true } : t)
+      })),
 
       setUniversities: (universities) => set({ universities }),
 
@@ -161,16 +170,19 @@ export const useAppStore = create<AppState>()(
 
         // Auto-update stage if we have a shortlist and are in stage 2
         let newStage = state.currentStage;
+        let newTasks = state.tasks;
         if (state.currentStage === 2 && newList.length >= 1) {
-          // Just a visual cue, strictly speaking stage 3 is decision time
+          newStage = 3;
+          newTasks = state.tasks.map(t => t.stage < 3 ? { ...t, completed: true } : t);
         }
 
-        return { shortlistedIds: newList };
+        return { shortlistedIds: newList, currentStage: newStage, tasks: newTasks };
       }),
 
       lockUniversity: (id) => set((state) => ({
         lockedUniversityId: id,
         currentStage: 4, // Jump to Application Prep
+        tasks: state.tasks.map(t => t.stage < 4 ? { ...t, completed: true } : t)
         // Add specific tasks for this uni could go here
       })),
 
@@ -192,6 +204,10 @@ export const useAppStore = create<AppState>()(
         )
       })),
 
+      deleteTask: (id) => set((state) => ({
+        tasks: state.tasks.filter(t => t.id !== id)
+      })),
+
       reset: () => set({
         user: INITIAL_USER,
         currentStage: 1,
@@ -203,8 +219,10 @@ export const useAppStore = create<AppState>()(
     {
       name: 'ai-counsellor-storage', // name of the item in the storage (must be unique)
       storage: createJSONStorage(() => localStorage), // (optional) by default, 'localStorage' is used
-      onRehydrateStorage: (state) => {
-        return () => state?.setHasHydrated(true);
+      onRehydrateStorage: () => {
+        return (state) => {
+          state?.setHasHydrated(true);
+        };
       }
     }
   )

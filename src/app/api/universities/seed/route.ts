@@ -19,6 +19,9 @@ const CURATED_UNIVERSITIES = [
     strengths: ['World-class faculty and research facilities', 'Strong industry connections in tech', 'Generous financial aid for admitted students', 'Entrepreneurial ecosystem'],
     website: 'https://www.stanford.edu',
     domain: 'stanford.edu',
+    costOfLiving: 2500,
+    avgSalary: 125000,
+    deadlines: new Date('2026-01-05'),
   },
   {
     name: 'Massachusetts Institute of Technology',
@@ -35,6 +38,9 @@ const CURATED_UNIVERSITIES = [
     strengths: ['Best STEM programs globally', 'Industry partnerships', 'Strong alumni network'],
     website: 'https://www.mit.edu',
     domain: 'mit.edu',
+    costOfLiving: 2200,
+    avgSalary: 130000,
+    deadlines: new Date('2026-01-01'),
   },
   {
     name: 'Harvard University',
@@ -51,6 +57,9 @@ const CURATED_UNIVERSITIES = [
     strengths: ['Best financial aid policies', 'World-class faculty', 'Unparalleled network'],
     website: 'https://www.harvard.edu',
     domain: 'harvard.edu',
+    costOfLiving: 2300,
+    avgSalary: 118000,
+    deadlines: new Date('2026-01-01'),
   },
   {
     name: 'University of California, Berkeley',
@@ -67,6 +76,9 @@ const CURATED_UNIVERSITIES = [
     strengths: ['Affordable compared to private universities', 'Silicon Valley proximity', 'Diverse student body'],
     website: 'https://www.berkeley.edu',
     domain: 'berkeley.edu',
+    costOfLiving: 2100,
+    avgSalary: 110000,
+    deadlines: new Date('2025-12-15'),
   },
   {
     name: 'University of Toronto',
@@ -83,6 +95,9 @@ const CURATED_UNIVERSITIES = [
     strengths: ['Post-study work permit (3 years)', 'Diverse international community', 'Affordable compared to US', 'High research output'],
     website: 'https://www.utoronto.ca',
     domain: 'utoronto.ca',
+    costOfLiving: 1800,
+    avgSalary: 85000,
+    deadlines: new Date('2026-01-15'),
   },
   {
     name: 'Technical University of Munich',
@@ -99,6 +114,9 @@ const CURATED_UNIVERSITIES = [
     strengths: ['No tuition fees', 'Strong engineering reputation', 'EU work opportunities', 'Industry connections'],
     website: 'https://www.tum.de',
     domain: 'tum.de',
+    costOfLiving: 1200,
+    avgSalary: 70000,
+    deadlines: new Date('2026-05-31'),
   },
   {
     name: 'Imperial College London',
@@ -115,6 +133,9 @@ const CURATED_UNIVERSITIES = [
     strengths: ['Prestigious degree', 'Central London location', 'Strong research focus', 'Excellent career outcomes'],
     website: 'https://www.imperial.ac.uk',
     domain: 'imperial.ac.uk',
+    costOfLiving: 2000,
+    avgSalary: 75000,
+    deadlines: new Date('2026-01-15'),
   },
   {
     name: 'University of Melbourne',
@@ -131,6 +152,9 @@ const CURATED_UNIVERSITIES = [
     strengths: ['Great lifestyle and weather', 'Post-study work visa (2-4 years)', 'Strong research output', 'Safe environment'],
     website: 'https://www.unimelb.edu.au',
     domain: 'unimelb.edu.au',
+    costOfLiving: 1700,
+    avgSalary: 72000,
+    deadlines: new Date('2025-11-30'),
   },
   {
     name: 'National University of Singapore',
@@ -147,6 +171,9 @@ const CURATED_UNIVERSITIES = [
     strengths: ['Top Asian university', 'Business hub location', 'Strong job market', 'Multicultural environment'],
     website: 'https://www.nus.edu.sg',
     domain: 'nus.edu.sg',
+    costOfLiving: 1500,
+    avgSalary: 68000,
+    deadlines: new Date('2026-01-31'),
   },
   {
     name: 'ETH Zurich',
@@ -163,6 +190,9 @@ const CURATED_UNIVERSITIES = [
     strengths: ['Extremely low tuition', 'World-class STEM programs', 'Beautiful location', 'High quality of life'],
     website: 'https://ethz.ch',
     domain: 'ethz.ch',
+    costOfLiving: 2400,
+    avgSalary: 95000,
+    deadlines: new Date('2025-12-15'),
   },
   {
     name: 'University of British Columbia',
@@ -179,6 +209,9 @@ const CURATED_UNIVERSITIES = [
     strengths: ['Post-study work permit', 'Beautiful location', 'Strong research', 'Welcoming community'],
     website: 'https://www.ubc.ca',
     domain: 'ubc.ca',
+    costOfLiving: 1700,
+    avgSalary: 82000,
+    deadlines: new Date('2026-01-15'),
   },
   {
     name: 'Arizona State University',
@@ -195,12 +228,20 @@ const CURATED_UNIVERSITIES = [
     strengths: ['High acceptance rate', 'Good industry partnerships', 'Innovative programs', 'Affordable'],
     website: 'https://www.asu.edu',
     domain: 'asu.edu',
+    costOfLiving: 1400,
+    avgSalary: 65000,
+    deadlines: new Date('2026-02-01'),
   },
 ];
 
 export async function POST(request: NextRequest) {
   const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+  // Basic security: only allow a specific user (admin) or dev environment
+  const ALLOWED_ADMINS = ['bhaktofmahakal@gmail.com']; // Replace with actual admin emails
+  if (!session?.user?.email || !ALLOWED_ADMINS.includes(session.user.email)) {
+    return NextResponse.json({ error: 'Unauthorized: Admin access required' }, { status: 401 });
+  }
 
   try {
     // Delete existing universities

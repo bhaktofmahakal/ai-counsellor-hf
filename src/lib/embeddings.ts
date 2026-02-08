@@ -4,7 +4,7 @@ import { HfInference } from '@huggingface/inference';
 const HF_API_KEY = process.env.HUGGINGFACE_API_KEY;
 const HF_EMBEDDING_MODEL = 'sentence-transformers/all-MiniLM-L6-v2';
 const EMBEDDING_DIMENSIONS = 384; // all-MiniLM-L6-v2 uses 384 dimensions
-const INDEX_DIMENSIONS = 1536; // Matching user's Upstash config
+const INDEX_DIMENSIONS = 1536; // Matching Upstash index dimensions (usually 1536 for OpenAI/Standard indexes)
 
 const hf = new HfInference(HF_API_KEY);
 

@@ -18,6 +18,7 @@ model User {
   education           String?
   degree              String?
   gpa                 String?
+  gpaScale            String?     @default("4")
   studyGoal           String?
   targetField         String?
   preferredCountries  String[]    @default([])
@@ -31,14 +32,17 @@ model User {
   targetIntake        String?     // Fall 2025, Spring 2026, etc.
   currentStage        Int         @default(1)
   lockedUniversityId  String?
+  lockedUniversity    University? @relation("LockedUniversity", fields: [lockedUniversityId], references: [id], onDelete: SetNull)
   avatar              String?
-  resetToken          String?     // OTP or Token for password reset
+  resetToken          String? // OTP or Token for password reset
   resetTokenExpiry    DateTime?   // Expiry for the reset token
   shortlists          Shortlist[]
   tasks               Task[]
   documents           Document[]
 
   @@index([email])
+  @@index([resetToken])
+  @@index([lockedUniversityId])
 }
 
 model University {
@@ -59,13 +63,14 @@ model University {
   domain         String?
   
   // Phase 3 & 4 additions
-  deadlines      String?     @default("December 1st") // For Phase 4 tracking
-  costOfLiving   Int?        @default(15000)
-  avgSalary      Int?        @default(75000)
+  deadlines      DateTime?   // For Phase 4 tracking
+  costOfLiving   Int?
+  avgSalary      Int?
   
   createdAt      DateTime    @default(now())
   updatedAt      DateTime    @updatedAt
   shortlists     Shortlist[]
+  lockedByUsers  User[]      @relation("LockedUniversity")
 
   @@index([country])
   @@index([name])
@@ -96,6 +101,7 @@ model Shortlist {
 
   @@unique([userId, universityId])
   @@index([userId])
+  @@index([universityId])
 }
 
 model Task {
@@ -113,6 +119,8 @@ model Task {
 
   @@index([userId])
   @@index([stage])
+  @@index([completed])
+  @@index([userId, stage])
 }
 
 model Conversation {

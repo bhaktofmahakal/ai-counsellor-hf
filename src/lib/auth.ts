@@ -26,12 +26,12 @@ export const authOptions: AuthOptions = {
                 }) as any;
 
                 if (!user || !user.password) {
-                    throw new Error("User not found or no password set. Please use Google sign-in.");
+                    throw new Error("Invalid email or password");
                 }
 
                 const isValid = await bcrypt.compare(credentials.password, user.password);
                 if (!isValid) {
-                    throw new Error("Invalid password");
+                    throw new Error("Invalid email or password");
                 }
 
                 return {
@@ -79,7 +79,11 @@ export const authOptions: AuthOptions = {
             }
 
             if (trigger === "update" && session) {
-                return { ...token, ...session };
+                // Whitelist fields to prevent mass-assignment in token
+                if (session.onboardingCompleted !== undefined) token.onboardingCompleted = session.onboardingCompleted;
+                if (session.currentStage !== undefined) token.currentStage = session.currentStage;
+                if (session.name !== undefined) token.name = session.name;
+                return token;
             }
 
             return token;

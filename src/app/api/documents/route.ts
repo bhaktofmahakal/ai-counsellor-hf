@@ -11,12 +11,17 @@ export async function GET(req: NextRequest) {
     }
 
     try {
+        const user = await prisma.user.findUnique({
+            where: { email: session.user.email }
+        });
+
         const documents = await (prisma as any).document.findMany({
             where: {
-                user: { email: session.user.email }
+                userId: user?.id
             },
             orderBy: { updatedAt: 'desc' }
         });
+
         return NextResponse.json(documents);
     } catch (error) {
         console.error('Error fetching documents:', error);

@@ -9,10 +9,12 @@ interface MarkdownRendererProps {
 
 export function MarkdownRenderer({ content, className = '' }: MarkdownRendererProps) {
   const renderedContent = React.useMemo(() => {
-    // Strip internal document delimiters from being rendered in chat
+    // Strip internal technical markers from being rendered in chat
     let html = content
       .replace(/\[\[\[DOC_CONTENT_START\]\]\]/gi, '')
       .replace(/\[\[\[DOC_CONTENT_END\]\]\]/gi, '')
+      .replace(/\[ACTION:[\s\S]*?\]/gi, '') // Strip [ACTION:...]
+      .replace(/\[DATA:[\s\S]*?\{[\s\S]*?\}\s*\]/gi, '') // Strip [DATA:...]
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;');
@@ -45,17 +47,17 @@ export function MarkdownRenderer({ content, className = '' }: MarkdownRendererPr
     html = html.replace(/class="list-item-number"/g, '');
 
     // Paragraphs and breaks
-    // Avoid wrapping items already in lists/headers
-    const lines = html.split('\n');
-    const processedLines = lines.map(line => {
-      if (line.trim() === '') return '<div class="h-2"></div>';
-      if (line.startsWith('<h') || line.startsWith('<ul') || line.startsWith('<ol') || line.startsWith('<li') || line.startsWith('</')) {
-        return line;
+    const sections = html.split(/\n\n+/);
+    const processedSections = sections.map(section => {
+      const trimmed = section.trim();
+      if (!trimmed) return '';
+      if (trimmed.startsWith('<h') || trimmed.startsWith('<ul') || trimmed.startsWith('<ol') || trimmed.startsWith('<li') || trimmed.startsWith('</')) {
+        return trimmed;
       }
-      return `<p class="mb-3 last:mb-0">${line}</p>`;
+      return `<p class="mb-4 last:mb-0">${trimmed.replace(/\n/g, '<br />')}</p>`;
     });
 
-    return processedLines.join('');
+    return processedSections.join('');
   }, [content]);
 
   return (

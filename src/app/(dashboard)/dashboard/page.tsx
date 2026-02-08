@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useAppStore, AppStage } from '@/lib/store';
 import {
@@ -82,15 +82,62 @@ export default function DashboardPage() {
    ];
 
    const strength = calculateProfileStrength(user);
-   // Stable "Precision" calculation based on userId to avoid hydration mismatch
-   const userSeed = user.id ? user.id.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0) % 5 : 0;
-   const precision = Math.max(strength - 5, 0) + userSeed;
+   // Precision is directly tied to strength for consistency
+   const precision = strength;
 
    // Get top recommendations (simple filter for now)
    const recommendations = universities.slice(0, 3);
 
    // Get active tasks (limit 3)
    const activeTasks = tasks.filter(t => !t.completed).slice(0, 3);
+
+   const lockedUni = universities.find(u => u.id === lockedUniversityId);
+
+   const [daysRemaining, setDaysRemaining] = useState<number | null>(null);
+
+   useEffect(() => {
+      const intake = user.targetIntake || 'fall-2026';
+      const isFall = intake.includes('fall');
+      const yearStr = intake.match(/\d{4}/)?.[0];
+      const intakeYear = yearStr ? parseInt(yearStr) : 2026;
+
+      let priorityDate: Date;
+      if (isFall) {
+         priorityDate = new Date(intakeYear - 1, 11, 15);
+      } else {
+         priorityDate = new Date(intakeYear - 1, 7, 15);
+      }
+
+      const today = new Date();
+      const diffTime = priorityDate.getTime() - today.getTime();
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+      setDaysRemaining(diffDays);
+   }, [user.targetIntake]);
+
+   const getDeadlines = () => {
+      const intake = user.targetIntake || 'fall-2026';
+      const isFall = intake.includes('fall');
+      const yearStr = intake.match(/\d{4}/)?.[0];
+      const intakeYear = yearStr ? parseInt(yearStr) : 2026;
+
+      let priorityDate: Date;
+      let finalDate: Date;
+
+      if (isFall) {
+         priorityDate = new Date(intakeYear - 1, 11, 15); // Dec 15 of previous year
+         finalDate = new Date(intakeYear, 2, 1);       // Mar 1 of intake year
+      } else {
+         priorityDate = new Date(intakeYear - 1, 7, 15);  // Aug 15 of previous year
+         finalDate = new Date(intakeYear - 1, 9, 1);   // Oct 1 of previous year
+      }
+
+      return {
+         priority: priorityDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+         final: finalDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+      };
+   };
+
+   const deadlines = getDeadlines();
 
    return (
       <div className="space-y-8">
@@ -101,7 +148,7 @@ export default function DashboardPage() {
                   Mission Control
                </h1>
                <p className="text-slate-400 text-sm md:text-base max-w-2xl leading-relaxed">
-                  Welcome back, <span className="text-white font-semibold">{user.name || 'Student'}</span>. You are on track for your study abroad journey with <span className="text-blue-400 font-bold">{precision}% Precision</span>.
+                  Welcome back, <span className="text-white font-semibold">{user.name || 'Student'}</span>. {lockedUni ? `You are officially applying to ${lockedUni.name}.` : `You are on track for your study abroad journey with ${precision}% Precision.`}
                </p>
             </div>
             <div className="flex flex-wrap items-center gap-3">
@@ -118,6 +165,44 @@ export default function DashboardPage() {
                </Link>
             </div>
          </div>
+
+         {/* Locked University Highlight (Phase 4) */}
+         {lockedUni && (
+            <div className="glass-card p-6 rounded-2xl bg-gradient-to-r from-emerald-600/20 to-transparent border-emerald-500/20 animate-in fade-in slide-in-from-top-4 duration-500">
+               <div className="flex flex-col md:flex-row items-center justify-between gap-6">
+                  <div className="flex items-center gap-5">
+                     <div className="h-16 w-16 rounded-2xl bg-white/5 flex items-center justify-center border border-white/10">
+                        <LogoImage name={lockedUni.name} domain={lockedUni.domain} />
+                     </div>
+                     <div>
+                        <div className="flex items-center gap-2 mb-1">
+                           <Badge className="bg-emerald-500 text-white border-none text-[10px] px-2 py-0.5">LOCKED CHOICE</Badge>
+                           <span className="text-xs text-slate-500 font-mono uppercase tracking-widest">Stage 4 Active</span>
+                        </div>
+                        <h2 className="text-2xl font-display font-bold text-white leading-none">{lockedUni.name}</h2>
+                        <p className="text-slate-400 text-sm mt-1">
+                           {(lockedUni.location || lockedUni.country)
+                              ? `${lockedUni.location ?? ''}${lockedUni.location && lockedUni.country ? ', ' : ''}${lockedUni.country ?? ''}`
+                              : 'Location unknown'}
+                        </p>
+                     </div>
+                  </div>
+                  <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
+                     <Link href="/dashboard/documents" className="flex-1">
+                        <button className="w-full px-6 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm transition-all flex items-center justify-center gap-2">
+                           <FileText className="h-4 w-4" />
+                           Application Prep
+                        </button>
+                     </Link>
+                     <Link href="/dashboard/universities">
+                        <button className="px-6 py-3 rounded-xl bg-white/5 hover:bg-white/10 text-white font-bold text-sm transition-all border border-white/10">
+                           Change
+                        </button>
+                     </Link>
+                  </div>
+               </div>
+            </div>
+         )}
 
          {/* Progress Track */}
          <div className="glass-card p-1 rounded-2xl overflow-hidden">
@@ -220,14 +305,16 @@ export default function DashboardPage() {
                   <div className="grid sm:grid-cols-2 gap-4">
                      <div className="p-4 rounded-xl bg-white/5 border border-white/5">
                         <div className="text-xs text-slate-500 uppercase tracking-widest font-bold mb-1">Priority Deadline</div>
-                        <div className="text-xl font-display font-black text-white">Dec 15, 2025</div>
-                        <div className="mt-2 text-[10px] text-amber-500 flex items-center gap-1">
-                           <Clock className="h-3 w-3" /> 45 Days Remaining
-                        </div>
+                        <div className="text-xl font-display font-black text-white">{deadlines.priority}</div>
+                        {daysRemaining !== null && (
+                           <div className={`mt-2 text-[10px] flex items-center gap-1 ${daysRemaining < 30 ? 'text-red-400' : 'text-amber-500'}`}>
+                              <Clock className="h-3 w-3" /> {daysRemaining > 0 ? `${daysRemaining} Days Remaining` : 'Deadline Passed'}
+                           </div>
+                        )}
                      </div>
                      <div className="p-4 rounded-xl bg-white/5 border border-white/5">
                         <div className="text-xs text-slate-500 uppercase tracking-widest font-bold mb-1">Final Decision</div>
-                        <div className="text-xl font-display font-black text-white">Mar 01, 2026</div>
+                        <div className="text-xl font-display font-black text-white">{deadlines.final}</div>
                         <div className="mt-2 text-[10px] text-slate-500 italic">Expected official notification</div>
                      </div>
                   </div>
@@ -289,10 +376,18 @@ export default function DashboardPage() {
                            onClick={() => handleToggleTask(task.id)}
                            className="flex items-start gap-3 p-3 rounded-lg bg-white/5 hover:bg-white/10 transition-colors cursor-pointer"
                         >
-                           <div className={`mt-1 h-2 w-2 rounded-full ${task.priority === 'high' ? 'bg-blue-600' : 'bg-amber-500'}`} />
-                           <div>
-                              <p className="text-sm font-medium text-slate-200">{task.title}</p>
-                              <p className="text-xs text-slate-500 mt-1">Due: {task.due}</p>
+                           <div className={`mt-1.5 h-1.5 w-1.5 rounded-full ${task.priority === 'high' ? 'bg-blue-600 shadow-[0_0_8px_rgba(37,99,235,0.8)]' : 'bg-amber-500'}`} />
+                           <div className="flex-1 min-w-0">
+                              <p className={`text-sm font-bold ${task.priority === 'high' ? 'text-white' : 'text-slate-200'}`}>
+                                 {task.title}
+                              </p>
+                              {task.description ? (
+                                 <p className="text-[10px] text-slate-500 mt-1 leading-relaxed line-clamp-1 group-hover:line-clamp-none transition-all">
+                                    {task.description}
+                                 </p>
+                              ) : (
+                                 <p className="text-[10px] text-slate-500 mt-1">Due: {task.due || 'ASAP'}</p>
+                              )}
                            </div>
                         </div>
                      )) : (

@@ -26,12 +26,19 @@ export async function GET(request: NextRequest) {
     let universities = [];
 
     if (useRAG && user) {
+      const ragWhere: any = {};
+      if (country) ragWhere.country = country;
+
       if (search) {
         const ragResults = await semanticUniversitySearch(search, user, 20);
         const universityIds = ragResults.map(r => r.id);
         const fetchedUniversities = await prisma.university.findMany({
-          where: { id: { in: universityIds } },
+          where: { 
+            id: { in: universityIds },
+            ...ragWhere
+          },
         });
+        // Preserve RAG order but filter by country
         universities = universityIds
           .map(id => fetchedUniversities.find(u => u.id === id))
           .filter(Boolean) as any[];
@@ -39,6 +46,7 @@ export async function GET(request: NextRequest) {
         if (universities.length === 0) {
           universities = await prisma.university.findMany({
             where: {
+              ...ragWhere,
               OR: [
                 { name: { contains: search, mode: 'insensitive' } },
                 { country: { contains: search, mode: 'insensitive' } }
@@ -51,7 +59,10 @@ export async function GET(request: NextRequest) {
         const recommendations = await generateUniversityRecommendations(user);
         const universityIds = recommendations.map(r => r.id);
         const fetchedUniversities = await prisma.university.findMany({
-          where: { id: { in: universityIds } },
+          where: { 
+            id: { in: universityIds },
+            ...ragWhere
+          },
         });
         universities = universityIds
           .map(id => fetchedUniversities.find(u => u.id === id))
@@ -59,6 +70,7 @@ export async function GET(request: NextRequest) {
 
         if (universities.length === 0) {
           universities = await prisma.university.findMany({
+            where: ragWhere,
             orderBy: { rank: 'asc' },
             take: 10
           });

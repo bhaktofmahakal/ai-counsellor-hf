@@ -4,7 +4,7 @@ import { indexUniversity } from '@/lib/embeddings';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 
-const HIPOLABS_API = 'http://universities.hipolabs.com/search';
+const HIPOLABS_API = 'https://universities.hipolabs.com/search';
 
 const TARGET_COUNTRIES = [
   'United States',
@@ -50,20 +50,34 @@ const ACCEPTANCE_RATES: Record<string, string> = {
 
 export async function POST(request: NextRequest) {
   const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+  // Basic security: only allow admin for sync.
+  const ALLOWED_ADMINS = ['bhaktofmahakal@gmail.com'];
+  if (!session?.user?.email || !ALLOWED_ADMINS.includes(session.user.email)) {
+    return NextResponse.json({ error: 'Unauthorized: Admin access required' }, { status: 401 });
+  }
+
   try {
     let totalSynced = 0;
     let totalEmbedded = 0;
 
     for (const country of TARGET_COUNTRIES) {
       const response = await fetch(`${HIPOLABS_API}?country=${encodeURIComponent(country)}`);
-      const universities = await response.json();
+      if (!response.ok) {
+        console.error(`Failed to fetch ${country} from Hipolabs: ${response.status}`);
+        continue;
+      }
+
+      const universities = await response.json().catch(() => []);
 
       const limited = universities.slice(0, 30);
 
       for (const uni of limited) {
+        const domain = uni.domains?.[0];
+        if (!domain) continue;
+
         const existingUni = await prisma.university.findFirst({
-          where: { domain: uni.domains?.[0] },
+          where: { domain },
         });
 
         if (existingUni) continue;

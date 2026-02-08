@@ -92,7 +92,7 @@ export async function PATCH(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { email, password, ...updateData } = body;
+    const { email, password, universityData, ...updateData } = body;
 
     if (email && email !== session.user.email) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
@@ -103,13 +103,64 @@ export async function PATCH(request: NextRequest) {
       cleanedData.password = await bcrypt.hash(password, 10);
     }
 
-    const user = await prisma.user.update({
+    // Materialize university if it's external and data is provided
+    if (cleanedData.lockedUniversityId && cleanedData.lockedUniversityId.startsWith('ext-') && universityData) {
+      try {
+        const exists = await prisma.university.findUnique({ where: { id: cleanedData.lockedUniversityId } });
+        if (!exists) {
+          const { id, matchScore, ...cleanUniData } = universityData;
+          await prisma.university.create({
+            data: {
+              ...cleanUniData,
+              id: cleanedData.lockedUniversityId
+            }
+          });
+        }
+      } catch (e) {
+        console.error('Failed to materialize university on lock:', e);
+      }
+    }
+
+    // Ensure preferredCountries is an array if present
+    if (cleanedData.preferredCountries) {
+      if (typeof cleanedData.preferredCountries === 'string') {
+        cleanedData.preferredCountries = cleanedData.preferredCountries.split(',').map((c: string) => c.trim());
+      } else if (!Array.isArray(cleanedData.preferredCountries)) {
+        cleanedData.preferredCountries = [cleanedData.preferredCountries];
+      }
+    }
+
+    // Sanitize numeric fields
+    if (cleanedData.budgetMax) cleanedData.budgetMax = parseInt(cleanedData.budgetMax) || 0;
+    if (cleanedData.budgetMin) cleanedData.budgetMin = parseInt(cleanedData.budgetMin) || 0;
+    if (cleanedData.currentStage) cleanedData.currentStage = parseInt(cleanedData.currentStage) || 1;
+
+    // Use upsert instead of update to be more resilient (e.g. if record was somehow deleted or not created)
+    const user = await prisma.user.upsert({
       where: { email: session.user.email },
-      data: cleanedData as any,
+      update: cleanedData as any,
+      create: {
+        email: session.user.email,
+        name: session.user.name || 'Student',
+        ...cleanedData,
+      } as any,
     }) as any;
 
     if (user.id) {
       await recalculateUniversityMatches(user.id);
+
+      // AUTO-SHORTLIST on LOCK
+      if (cleanedData.lockedUniversityId) {
+        const existingShortlist = await prisma.shortlist.findUnique({
+          where: { userId_universityId: { userId: user.id, universityId: cleanedData.lockedUniversityId } }
+        });
+        if (!existingShortlist) {
+          await prisma.shortlist.create({
+            data: { userId: user.id, universityId: cleanedData.lockedUniversityId }
+          }).catch(err => console.error('Auto-shortlist failed:', err));
+        }
+      }
+
       // Sync tasks if stage changed
       if (cleanedData.currentStage || cleanedData.lockedUniversityId) {
         await syncStageTasks(user.id, user.currentStage);
@@ -118,8 +169,12 @@ export async function PATCH(request: NextRequest) {
 
     const { password: _, ...safeUser } = user;
     return NextResponse.json(safeUser);
-  } catch (error) {
-    return NextResponse.json({ error: 'Failed to update user' }, { status: 500 });
+  } catch (error: any) {
+    console.error('❌ [API/User] PATCH Error:', error);
+    return NextResponse.json({ 
+      error: 'Failed to update user', 
+      details: error?.message || 'Unknown error' 
+    }, { status: 500 });
   }
 }
 
