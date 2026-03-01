@@ -96,6 +96,4 @@ Built using **Upstash Vector DB** for semantic search.
 ---
 
 ## 🎯 Our Vision
-To democratize high-end education consulting. We believe every student deserves a mentor who understands their data, respects their goals, and drives them toward execution.
-
-**Built for the AI Counsellor Hackathon.** 🚀
+To democratize high-end education consulting. We believe every student deserves a mentor who understands their data, respects their goals, and drives them toward execution. 
