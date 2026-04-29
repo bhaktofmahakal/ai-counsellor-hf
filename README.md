@@ -8,7 +8,7 @@
 
 ---
 
-## 🚀 Live Demo
+## 🚀 Live
 **Experience the future of education counselling:** [https://ai-counsellor-hf.vercel.app/](https://ai-counsellor-hf.vercel.app/)
 
 ---
