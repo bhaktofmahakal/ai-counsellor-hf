@@ -19,7 +19,7 @@ AI Counsellor is a study-abroad guidance platform that helps students move from 
 
 ## Data sources & accuracy
 - University data is stored in PostgreSQL and can be seeded into the database.
-- External lookups use the public **HipoLabs Universities API** for basic metadata.
+- External lookups use the public **Universities API** at https://universities.hipolabs.com for basic metadata.
 - Semantic matching uses **Hugging Face embeddings** with **Upstash Vector**.
 - **Accuracy is not guaranteed.** Tuition, rankings, acceptance rates, and deadlines should be verified with official sources.
 
