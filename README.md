@@ -1,6 +1,6 @@
 # AI Counsellor
 
-AI Counsellor is a study‑abroad guidance platform that helps students move from profile setup to application prep through a structured, stage‑based workflow. This repository focuses on the product core: onboarding, discovery, shortlisting, locking, and task/document management.
+AI Counsellor is a study-abroad guidance platform that helps students move from profile setup to application prep through a structured, stage-based workflow. This repository focuses on the product core: onboarding, discovery, shortlisting, locking, and task/document management.
 
 ## Product workflow
 1. **Profile building** — collect academic background, goals, budget, and test readiness.
@@ -10,10 +10,10 @@ AI Counsellor is a study‑abroad guidance platform that helps students move fro
 
 ## Core capabilities
 - **Stage-based guidance** with gating logic for shortlisting and locking.
-- **AI counsellor chat** with persona modes and stage‑aware responses.
+- **AI counsellor chat** with persona modes and stage-aware responses.
 - **Semantic university discovery** powered by embeddings + vector search.
 - **Shortlist management** and university locking to drive focus.
-- **Task management** with per‑stage tasks and progress tracking.
+- **Task management** with per-stage tasks and progress tracking.
 - **Document workspace** for creating, uploading, editing, and exporting SOPs/Resumes.
 - **Optional voice mode** (browser speech + ElevenLabs TTS when configured).
 
