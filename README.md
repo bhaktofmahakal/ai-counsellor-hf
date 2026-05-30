@@ -1,99 +1,71 @@
-# 🎓 AI Counsellor — Your Strategic Study Abroad Mentor
+# AI Counsellor
 
-[![Vercel Deployment](https://img.shields.io/badge/Deployment-Live-success?style=for-the-badge&logo=vercel)](https://ai-counsellor-hf.vercel.app/)
-[![Next.js](https://img.shields.io/badge/Next.js-15-black?style=for-the-badge&logo=next.js)](https://nextjs.org/)
-[![Groq](https://img.shields.io/badge/AI-Groq%20Llama%203.3-orange?style=for-the-badge)](https://groq.com/)
+AI Counsellor is a study‑abroad guidance platform that helps students move from profile setup to application prep through a structured, stage‑based workflow. This repository focuses on the product core: onboarding, discovery, shortlisting, locking, and task/document management.
 
-**AI Counsellor** is a guided, stage-based platform designed to turn student confusion into clarity. Unlike generic chatbots, this is an **Execution-led Decision Engine** that guides students through a strict 4-stage roadmap: from profile building to university locking and application preparation.
+## Product workflow
+1. **Profile building** — collect academic background, goals, budget, and test readiness.
+2. **University discovery** — search and match programs based on the profile.
+3. **Shortlist & lock** — commit to a small set of target universities.
+4. **Application prep** — generate actionable tasks and manage documents.
 
----
+## Core capabilities
+- **Stage-based guidance** with gating logic for shortlisting and locking.
+- **AI counsellor chat** with persona modes and stage‑aware responses.
+- **Semantic university discovery** powered by embeddings + vector search.
+- **Shortlist management** and university locking to drive focus.
+- **Task management** with per‑stage tasks and progress tracking.
+- **Document workspace** for creating, uploading, editing, and exporting SOPs/Resumes.
+- **Optional voice mode** (browser speech + ElevenLabs TTS when configured).
 
-## 🚀 Live
-**Experience the future of education counselling:** [https://ai-counsellor-hf.vercel.app/](https://ai-counsellor-hf.vercel.app/)
+## Data sources & accuracy
+- University data is stored in PostgreSQL and can be seeded into the database.
+- External lookups use the public **Hipolabs Universities API** for basic metadata.
+- Semantic matching uses **Hugging Face embeddings** with **Upstash Vector**.
+- **Accuracy is not guaranteed.** Tuition, rankings, acceptance rates, and deadlines should be verified with official sources.
 
----
+## AI & automation
+- **LLM**: Groq via `groq-sdk` (configured with `GROQ_API_KEY`).
+- **Onboarding interview**: AI collects profile details in a structured flow.
+- **Stage-aware prompts**: The model adapts guidance based on the user’s current stage and locked universities.
 
-## ✨ Core Features
+## Security & privacy (implementation notes)
+- **Auth**: NextAuth with Google OAuth and credentials.
+- **Passwords**: hashed with `bcryptjs`.
+- **Data**: stored in PostgreSQL via Prisma.
 
-### 🧠 1. Agentic AI Counsellor (Call Mode)
-Powered by **Groq (Llama 3.3 70B)** for ultra-low latency (<500ms).
-- **Interactive Voice**: Speak naturally with your mentor using "Call Mode".
-- **Agentic Actions**: The AI doesn't just talk; it creates tasks, shortlists universities, and drafts documents directly in the database using custom action tags.
+This repo does not make compliance claims (SOC 2, GDPR, FERPA, etc.). Review and extend security controls before deploying to production environments handling sensitive data.
 
-### 🔍 2. RAG-Powered Discovery
-Built using **Upstash Vector DB** for semantic search.
-- **Contextual Matching**: Finds universities based on the "intent" of your search, not just keywords.
-- **Match Scoring**: Every university is ranked as *Dream, Target, or Safe* based on a custom algorithm comparing student GPA, budget, and goals.
+## Tech stack
+- **Web**: Next.js 15, React 19, TypeScript
+- **UI**: Tailwind CSS, shadcn-style components, Framer Motion
+- **Data**: PostgreSQL, Prisma ORM
+- **AI**: Groq Llama 3.3, Hugging Face embeddings
+- **Vector/Cache**: Upstash Vector, Upstash Redis
+- **Auth**: NextAuth
 
-### 🛡️ 3. Decision Discipline (University Locking)
-- **Commitment Step**: Users must "Lock" a university to proceed to the application phase.
-- **Stage-Gate Logic**: The platform restricts access to specialized tools (like the SOP drafter) until a commitment is made, ensuring focus and momentum.
-
-### 📊 4. Mission Control Dashboard
-- **4-Stage Roadmap**: Visual tracking of your journey (Profile → Discovery → Finalizing → Application).
-- **Profile Strength**: Real-time calculation of your "Precision Score" to identify gaps in your academic profile.
-
-### 📄 5. AI Document Vault
-- **Auto-Generated SOPs**: AI drafts your Statement of Purpose based on your unique profile.
-- **Export to PDF**: Refine your documents in a built-in workspace and export professional PDFs.
-
----
-
-## 🛠️ Technical Architecture
-
-| Layer | Technology |
-| :--- | :--- |
-| **Frontend** | Next.js 15 (App Router), Tailwind CSS, Framer Motion |
-| **Backend** | Next.js API Routes, Prisma ORM |
-| **Database** | PostgreSQL |
-| **AI/LLM** | Groq (Llama 3.3 70B), OpenAI Whisper (for STT Fallback) |
-| **Vector DB** | Upstash Vector (RAG Implementation) |
-| **Auth** | NextAuth.js (Google & Credentials) |
-| **State Management** | Zustand |
-
----
-
-## 📸 UI Aesthetics
-- **WebGL Shaders**: LiquidChrome effects for a premium "SaaS" feel.
-- **Bento Grids**: Modern, clean organization of data and stats.
-- **Micro-interactions**: High-fidelity animations using Framer Motion.
-
----
-
-## ⚡ Quick Start (Local)
-
-1. **Clone the repo:**
-   ```bash
-   git clone <repo-url>
-   cd ai-counsellor
-   ```
-
-2. **Install dependencies:**
+## Local development
+1. Install dependencies
    ```bash
    npm install
    ```
-
-3. **Set up environment variables (.env):**
-   ```env
-   DATABASE_URL=
-   GROQ_API_KEY=
-   UPSTASH_VECTOR_REST_URL=
-   UPSTASH_VECTOR_REST_TOKEN=
-   NEXTAUTH_SECRET=
+2. Configure environment variables
+   ```bash
+   cp .env.example .env
    ```
-
-4. **Initialize Database:**
+3. Initialize the database
    ```bash
    npx prisma generate
    npx prisma db push
    ```
-
-5. **Run the dev server:**
+4. Run the dev server
    ```bash
    npm run dev
    ```
 
+## Deployment notes
+- This project expects valid API keys for Groq, Hugging Face, Upstash, and (optionally) ElevenLabs.
+- External network access is required for Google Fonts in Next.js builds by default.
+
 ---
 
-## 🎯 Our Vision
-To democratize high-end education consulting. We believe every student deserves a mentor who understands their data, respects their goals, and drives them toward execution. 
+If you’re evaluating the platform for production use, start by validating data sources and aligning the workflow with your institution’s policies and guidance standards.
