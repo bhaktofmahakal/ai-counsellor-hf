@@ -19,9 +19,9 @@ AI Counsellor is a study-abroad guidance platform that helps students move from 
 
 ## Data sources & accuracy
 - University data is stored in PostgreSQL and can be seeded into the database.
-- External lookups use the public **Universities API** at https://universities.hipolabs.com for basic metadata.
+- External lookups use the public **Universities API** at https://universities.hipolabs.com for basic metadata. If it is unavailable, discovery relies on the local database only.
 - Semantic matching uses **Hugging Face embeddings** with **Upstash Vector**.
-- **Accuracy is not guaranteed.** Tuition, rankings, acceptance rates, and deadlines should be verified with official sources.
+- **Accuracy is not guaranteed.** Verify tuition, rankings, acceptance rates, and deadlines directly on official university admissions sites and program pages.
 
 ## AI & automation
 - **LLM**: Groq via `groq-sdk` (configured with `GROQ_API_KEY`).
@@ -32,8 +32,9 @@ AI Counsellor is a study-abroad guidance platform that helps students move from 
 - **Auth**: NextAuth with Google OAuth and credentials.
 - **Passwords**: hashed with `bcryptjs`.
 - **Data**: stored in PostgreSQL via Prisma.
+- **API access**: server-side session checks are enforced on authenticated routes.
 
-This repo does not make compliance claims (SOC 2, GDPR, FERPA, etc.). Review and extend security controls before deploying to production environments handling sensitive data.
+This repo does not make compliance claims (SOC 2, GDPR, FERPA, etc.). For production, evaluate needs such as rate limiting, audit logging, secrets management, and encryption at rest.
 
 ## Tech stack
 - **Web**: Next.js 15, React 19, TypeScript
