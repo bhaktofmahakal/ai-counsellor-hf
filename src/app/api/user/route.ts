@@ -2,22 +2,30 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { seedUserTasks } from '@/lib/seedUserTasks';
 import { recalculateUniversityMatches } from '@/lib/calculateMatchScore';
-import { redis } from '@/lib/upstash';
+import { getServerSession } from 'next-auth';
+import { syncStageTasks } from '@/lib/stageTasks';
+import bcrypt from 'bcryptjs';
+
+import { authOptions } from '@/lib/auth';
 
 export async function GET(request: NextRequest) {
   try {
+    const session = await getServerSession(authOptions);
     const searchParams = request.nextUrl.searchParams;
     const email = searchParams.get('email');
 
-    if (!email) {
-      return NextResponse.json(
-        { error: 'Email is required' },
-        { status: 400 }
-      );
+    if (!session || !session.user?.email) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    if (email && email !== session.user.email) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
+
+    const activeEmail = email || session.user.email;
+
     const user = await prisma.user.findUnique({
-      where: { email },
+      where: { email: activeEmail },
       include: {
         shortlists: {
           include: {
@@ -26,174 +34,170 @@ export async function GET(request: NextRequest) {
         },
         tasks: true,
       },
-    });
+    }) as any;
 
     if (!user) {
-      console.error(`❌ [API/User] User not found: ${email}`);
-      return NextResponse.json(
-        { error: 'User not found' },
-        { status: 404 }
-      );
+      return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
 
-    console.log(`✅ [API/User] Fetched user: ${user.id}`);
-    return NextResponse.json(user);
+    const { password, ...safeUser } = user;
+    return NextResponse.json(safeUser);
   } catch (error: any) {
-    console.error('❌ [API/User] Error fetching user:', error);
-    return NextResponse.json(
-      { error: 'Failed to fetch user', details: error.message || String(error) },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: 'Failed to fetch user' }, { status: 500 });
   }
 }
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
+    const { email, password, name } = body;
 
-    const existingUser = await prisma.user.findUnique({
-      where: { email: body.email },
-    });
-
-    let user;
-    if (existingUser) {
-      user = await prisma.user.update({
-        where: { email: body.email },
-        data: body,
-      });
-      console.log(`✅ [API/User] Updated user: ${user.id}`);
-    } else {
-      user = await prisma.user.create({
-        data: body,
-      });
-
-      await seedUserTasks(user.id);
-      console.log(`✅ [API/User] Created user: ${user.id}`);
+    if (!email || !password) {
+      return NextResponse.json({ error: 'Email and password are required' }, { status: 400 });
     }
 
-    return NextResponse.json(user);
+    const existingUser = await prisma.user.findUnique({
+      where: { email },
+    });
+
+    if (existingUser) {
+      return NextResponse.json({ error: 'User already exists' }, { status: 400 });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    const user = await prisma.user.create({
+      data: {
+        email,
+        name: name || 'Student',
+        password: hashedPassword,
+        onboardingCompleted: false,
+        currentStage: 1,
+      } as any,
+    }) as any;
+
+    await seedUserTasks(user.id);
+    const { password: _, ...safeUser } = user;
+    return NextResponse.json(safeUser);
   } catch (error) {
-    console.error('❌ [API/User] Error creating/updating user:', error);
-    return NextResponse.json(
-      { error: 'Failed to save user' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: 'Failed to create user' }, { status: 500 });
   }
 }
 
 export async function PATCH(request: NextRequest) {
   try {
-    const body = await request.json();
-    const { email, ...updateData } = body;
-
-    if (!email) {
-      return NextResponse.json(
-        { error: 'Email is required' },
-        { status: 400 }
-      );
+    const session = await getServerSession(authOptions);
+    if (!session?.user?.email) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    console.log(`🔄 [API/User] Upserting user: ${email}`);
+    const body = await request.json();
+    const { email, password, universityData, ...updateData } = body;
 
-    // Clean updateData - remove null/undefined values
-    const cleanedData = Object.fromEntries(
-      Object.entries(updateData).filter(([_, v]) => v !== null && v !== undefined)
-    );
+    if (email && email !== session.user.email) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
 
-    const user = await prisma.user.upsert({
-      where: { email },
-      update: cleanedData,
-      create: {
-        email,
-        name: (cleanedData as any).name || 'Student',
-        onboardingCompleted: (cleanedData as any).onboardingCompleted ?? false,
-        currentStage: (cleanedData as any).currentStage || 1,
-        ...(cleanedData as any),
-      },
-    });
+    let cleanedData = { ...updateData };
+    if (password) {
+      cleanedData.password = await bcrypt.hash(password, 10);
+    }
 
-    console.log(`✅ [API/User] User upserted: ${user.id}`);
-
-    // If a university was just locked, generate/update stage 4 tasks
-    if (updateData.lockedUniversityId) {
-      const university = await prisma.university.findUnique({
-        where: { id: updateData.lockedUniversityId }
-      });
-
-      if (university) {
-        console.log(`🎯 [API/User] Generating specific tasks for: ${university.name}`);
-
-        // Update existing stage 4 tasks to be university-specific
-        const stage4Tasks = await prisma.task.findMany({
-          where: { userId: user.id, stage: 4 }
-        });
-
-        for (const task of stage4Tasks) {
-          let newTitle = task.title;
-          if (!newTitle.includes(university.name)) {
-            if (newTitle.includes('SOP')) newTitle = `Draft SOP for ${university.name}`;
-            else if (newTitle.includes('Recommendations')) newTitle = `Request LoRs for ${university.name}`;
-            else if (newTitle.includes('Essay Prompt')) newTitle = `Review ${university.name} Essay Prompt`;
-            else if (newTitle.includes('Financial')) newTitle = `Financial Affidavit for ${university.name}`;
-
-            await prisma.task.update({
-              where: { id: task.id },
-              data: { title: newTitle }
-            });
-          }
+    // Materialize university if it's external and data is provided
+    if (cleanedData.lockedUniversityId && cleanedData.lockedUniversityId.startsWith('ext-') && universityData) {
+      try {
+        const exists = await prisma.university.findUnique({ where: { id: cleanedData.lockedUniversityId } });
+        if (!exists) {
+          const { id, matchScore, ...cleanUniData } = universityData;
+          await prisma.university.create({
+            data: {
+              ...cleanUniData,
+              id: cleanedData.lockedUniversityId
+            }
+          });
         }
+      } catch (e) {
+        console.error('Failed to materialize university on lock:', e);
       }
     }
+
+    // Ensure preferredCountries is an array if present
+    if (cleanedData.preferredCountries) {
+      if (typeof cleanedData.preferredCountries === 'string') {
+        cleanedData.preferredCountries = cleanedData.preferredCountries.split(',').map((c: string) => c.trim());
+      } else if (!Array.isArray(cleanedData.preferredCountries)) {
+        cleanedData.preferredCountries = [cleanedData.preferredCountries];
+      }
+    }
+
+    // Sanitize numeric fields
+    if (cleanedData.budgetMax) cleanedData.budgetMax = parseInt(cleanedData.budgetMax) || 0;
+    if (cleanedData.budgetMin) cleanedData.budgetMin = parseInt(cleanedData.budgetMin) || 0;
+    if (cleanedData.currentStage) cleanedData.currentStage = parseInt(cleanedData.currentStage) || 1;
+
+    // Use upsert instead of update to be more resilient (e.g. if record was somehow deleted or not created)
+    const user = await prisma.user.upsert({
+      where: { email: session.user.email },
+      update: cleanedData as any,
+      create: {
+        email: session.user.email,
+        name: session.user.name || 'Student',
+        ...cleanedData,
+      } as any,
+    }) as any;
 
     if (user.id) {
       await recalculateUniversityMatches(user.id);
-      console.log(`✅ [API/User] Recalculated match scores for: ${user.id}`);
 
-      // Invalidate university caches for this user
-      try {
-        const keys = await redis.keys(`${email}:*`);
-        if (keys.length > 0) {
-          await redis.del(...keys);
-          console.log(`🧹 [API/User] Cleared ${keys.length} university cache keys for ${email}`);
+      // AUTO-SHORTLIST on LOCK
+      if (cleanedData.lockedUniversityId) {
+        const existingShortlist = await prisma.shortlist.findUnique({
+          where: { userId_universityId: { userId: user.id, universityId: cleanedData.lockedUniversityId } }
+        });
+        if (!existingShortlist) {
+          await prisma.shortlist.create({
+            data: { userId: user.id, universityId: cleanedData.lockedUniversityId }
+          }).catch(err => console.error('Auto-shortlist failed:', err));
         }
-      } catch (e) {
-        console.warn('⚠️ [API/User] Failed to clear university cache:', e);
+      }
+
+      // Sync tasks if stage changed
+      if (cleanedData.currentStage || cleanedData.lockedUniversityId) {
+        await syncStageTasks(user.id, user.currentStage);
       }
     }
 
-    return NextResponse.json(user);
-  } catch (error) {
-    console.error('❌ [API/User] Error updating user:', error);
-    return NextResponse.json(
-      { error: 'Failed to update user', details: String(error) },
-      { status: 500 }
-    );
+    const { password: _, ...safeUser } = user;
+    return NextResponse.json(safeUser);
+  } catch (error: any) {
+    console.error('❌ [API/User] PATCH Error:', error);
+    return NextResponse.json({ 
+      error: 'Failed to update user', 
+      details: error?.message || 'Unknown error' 
+    }, { status: 500 });
   }
 }
 
 export async function DELETE(request: NextRequest) {
   try {
+    const session = await getServerSession(authOptions);
+    if (!session?.user?.email) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
     const searchParams = request.nextUrl.searchParams;
     const email = searchParams.get('email');
 
-    if (!email) {
-      return NextResponse.json(
-        { error: 'Email is required' },
-        { status: 400 }
-      );
+    if (email && email !== session.user.email) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
     await prisma.user.delete({
-      where: { email },
+      where: { email: session.user.email },
     });
 
-    console.log(`✅ [API/User] Deleted user: ${email}`);
     return NextResponse.json({ success: true });
   } catch (error) {
-    console.error('❌ [API/User] Error deleting user:', error);
-    return NextResponse.json(
-      { error: 'Failed to delete user' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: 'Failed to delete user' }, { status: 500 });
   }
 }

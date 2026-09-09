@@ -1,93 +1,68 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '@/lib/auth';
 
 export async function GET(request: NextRequest) {
   try {
+    const session = await getServerSession(authOptions);
+    if (!session?.user?.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+    const user = await prisma.user.findUnique({ where: { email: session.user.email } });
+    if (!user) return NextResponse.json({ error: 'User not found' }, { status: 404 });
+
     const searchParams = request.nextUrl.searchParams;
-    const userId = searchParams.get('userId');
     const sessionId = searchParams.get('sessionId');
     const listSessions = searchParams.get('listSessions') === 'true';
 
-    if (!userId) {
-      return NextResponse.json(
-        { error: 'User ID is required' },
-        { status: 400 }
-      );
-    }
-
     if (listSessions) {
-      console.log(`🔍 [API/Conversations] Listing sessions for user: ${userId}`);
-      try {
-        const allMessages = await prisma.conversation.findMany({
-          where: { userId },
-          orderBy: { createdAt: 'desc' },
-        });
+      const allMessages = await prisma.conversation.findMany({
+        where: { userId: user.id },
+        orderBy: { createdAt: 'desc' },
+      });
 
-        // Manually get distinct sessions in JS for better compatibility
-        const seenSessions = new Set();
-        const sessions = allMessages.filter(m => {
-          const sid = (m as any).sessionId || 'default';
-          if (seenSessions.has(sid)) return false;
-          seenSessions.add(sid);
-          return true;
-        }).map(m => ({
-          ...m,
-          sessionId: (m as any).sessionId || 'default'
-        }));
+      const seenSessions = new Set();
+      const sessions = allMessages.filter(m => {
+        const sid = m.sessionId || 'default';
+        if (seenSessions.has(sid)) return false;
+        seenSessions.add(sid);
+        return true;
+      });
 
-        return NextResponse.json(sessions);
-      } catch (e: any) {
-        console.error(`❌ [API/Conversations] Error listing sessions:`, e.message);
-        // Fallback: just return all messages if distinct fails
-        const all = await prisma.conversation.findMany({
-          where: { userId },
-          orderBy: { createdAt: 'desc' },
-          take: 50
-        });
-        return NextResponse.json(all.map(m => ({
-          ...m,
-          sessionId: (m as any).sessionId || 'default'
-        })));
-      }
+      return NextResponse.json(sessions);
     }
 
-    const where: any = { userId };
-    if (sessionId) {
-      where.sessionId = sessionId;
-    } else {
-      where.sessionId = "default";
-    }
+    const where: any = { userId: user.id };
+    where.sessionId = sessionId || "default";
 
-    console.log(`🔍 [API/Conversations] Fetching messages for session: ${where.sessionId}`);
-    const conversations = await prisma.conversation.findMany({
+    const history = await prisma.conversation.findMany({
       where,
       orderBy: { createdAt: 'asc' },
     });
 
-    return NextResponse.json(conversations);
+    return NextResponse.json(history);
   } catch (error: any) {
-    console.error('❌ [API/Conversations] CRITICAL ERROR:', error.message);
-    return NextResponse.json(
-      { error: 'Failed to fetch conversation history', details: error.message },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: 'Failed to fetch conversations' }, { status: 500 });
   }
 }
 
 export async function POST(request: NextRequest) {
   try {
-    const { userId, role, content, sessionId, title } = await request.json();
+    const session = await getServerSession(authOptions);
+    if (!session?.user?.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-    if (!userId || !role || !content) {
-      return NextResponse.json(
-        { error: 'User ID, role, and content are required' },
-        { status: 400 }
-      );
+    const user = await prisma.user.findUnique({ where: { email: session.user.email } });
+    if (!user) return NextResponse.json({ error: 'User not found' }, { status: 404 });
+
+    const { role, content, sessionId, title } = await request.json();
+
+    if (!role || !content) {
+      return NextResponse.json({ error: 'Role and content are required' }, { status: 400 });
     }
 
-    const message = await (prisma.conversation as any).create({
+    const message = await prisma.conversation.create({
       data: {
-        userId,
+        userId: user.id,
         role,
         content,
         sessionId: sessionId || "default",
@@ -95,13 +70,42 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    console.log(`✅ [API/Conversations] Saved ${role} message for user: ${userId} in session: ${sessionId || 'default'}`);
     return NextResponse.json(message);
   } catch (error) {
-    console.error('❌ [API/Conversations] Error saving message:', error);
-    return NextResponse.json(
-      { error: 'Failed to save message' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: 'Failed to save message' }, { status: 500 });
+  }
+}
+
+export async function DELETE(request: NextRequest) {
+  try {
+    const session = await getServerSession(authOptions);
+    if (!session?.user?.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+    const user = await prisma.user.findUnique({ where: { email: session.user.email } });
+    if (!user) return NextResponse.json({ error: 'User not found' }, { status: 404 });
+
+    const searchParams = request.nextUrl.searchParams;
+    const sessionId = searchParams.get('sessionId');
+
+    if (sessionId) {
+      // Delete specific session
+      await prisma.conversation.deleteMany({
+        where: {
+          userId: user.id,
+          sessionId: sessionId
+        }
+      });
+      return NextResponse.json({ success: true, message: 'Session deleted' });
+    } else {
+      // Clear ALL history for this user
+      await prisma.conversation.deleteMany({
+        where: {
+          userId: user.id
+        }
+      });
+      return NextResponse.json({ success: true, message: 'All history cleared' });
+    }
+  } catch (error) {
+    return NextResponse.json({ error: 'Failed to delete' }, { status: 500 });
   }
 }

@@ -35,3 +35,4 @@ next-env.d.ts
 # .prisma
 .env
 .prisma
+.markdown-collab/

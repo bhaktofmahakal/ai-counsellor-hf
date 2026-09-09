@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { indexUniversity } from '@/lib/embeddings';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '@/lib/auth';
 
-const HIPOLABS_API = 'http://universities.hipolabs.com/search';
+const HIPOLABS_API = 'https://universities.hipolabs.com/search';
 
 const TARGET_COUNTRIES = [
   'United States',
@@ -47,30 +49,46 @@ const ACCEPTANCE_RATES: Record<string, string> = {
 };
 
 export async function POST(request: NextRequest) {
+  const session = await getServerSession(authOptions);
+
+  // Basic security: only allow admin for sync.
+  const ALLOWED_ADMINS = ['bhaktofmahakal@gmail.com'];
+  if (!session?.user?.email || !ALLOWED_ADMINS.includes(session.user.email)) {
+    return NextResponse.json({ error: 'Unauthorized: Admin access required' }, { status: 401 });
+  }
+
   try {
     let totalSynced = 0;
     let totalEmbedded = 0;
 
     for (const country of TARGET_COUNTRIES) {
       const response = await fetch(`${HIPOLABS_API}?country=${encodeURIComponent(country)}`);
-      const universities = await response.json();
+      if (!response.ok) {
+        console.error(`Failed to fetch ${country} from Hipolabs: ${response.status}`);
+        continue;
+      }
+
+      const universities = await response.json().catch(() => []);
 
       const limited = universities.slice(0, 30);
 
       for (const uni of limited) {
+        const domain = uni.domains?.[0];
+        if (!domain) continue;
+
         const existingUni = await prisma.university.findFirst({
-          where: { domain: uni.domains?.[0] },
+          where: { domain },
         });
 
         if (existingUni) continue;
 
         const rank = UNIVERSITY_RANKINGS[uni.name] || null;
         const tuition = TUITION_ESTIMATES[country] || 25000;
-        const acceptanceRate = rank 
+        const acceptanceRate = rank
           ? (rank <= 10 ? ACCEPTANCE_RATES['top-tier'] : ACCEPTANCE_RATES['competitive'])
           : ACCEPTANCE_RATES['moderate'];
 
-        const category = rank 
+        const category = rank
           ? (rank <= 10 ? 'Dream' : rank <= 50 ? 'Target' : 'Safe')
           : 'Target';
 
@@ -140,7 +158,7 @@ export async function POST(request: NextRequest) {
 
 function inferPrograms(name: string, country: string): string[] {
   const base = ['Computer Science', 'Engineering', 'Business', 'Data Science'];
-  
+
   if (name.includes('Technology') || name.includes('Tech')) {
     return ['Computer Science', 'Engineering', 'AI/ML', 'Robotics'];
   }
@@ -150,7 +168,7 @@ function inferPrograms(name: string, country: string): string[] {
   if (name.includes('Arts') || name.includes('Humanities')) {
     return ['Liberal Arts', 'Social Sciences', 'Psychology', 'Literature'];
   }
-  
+
   return base;
 }
 
@@ -188,6 +206,6 @@ function generateRisksStrengths(country: string, tuition: number, rank: number |
   }
 
   strengths.push('Strong international community');
-  
+
   return { risks, strengths };
 }

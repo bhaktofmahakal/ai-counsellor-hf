@@ -8,6 +8,8 @@ import { GradientButton } from '@/components/lightswind/gradient-button';
 import { Card } from '@/components/lightswind/card';
 import { Input } from '@/components/lightswind/input';
 import { ArrowRight, Sparkles } from 'lucide-react';
+import Image from 'next/image';
+import { toast } from 'sonner';
 import { useAppStore } from '@/lib/store';
 
 export default function LoginPage() {
@@ -31,27 +33,56 @@ export default function LoginPage() {
     e.preventDefault();
     setLoading(true);
 
-    // Simulate login
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    try {
+      const result = await signIn('credentials', {
+        redirect: false,
+        email,
+        password,
+      });
 
-    // Update store with email (mock login)
-    if (email) updateUser({ email });
-    login(); // Set authenticated
+      if (result?.error) {
+        toast.error("Sign in failed", {
+          description: result.error === "CredentialsSignin" ? "Invalid email or password." : result.error
+        });
+        setLoading(false);
+        return;
+      }
 
-    // Check onboarding
-    if (user.onboardingCompleted) {
-      router.push('/dashboard');
-    } else {
-      router.push('/dashboard/onboarding');
+      toast.success("Welcome back!", {
+        description: "Checking your status..."
+      });
+
+      // Fetch fresh user data to update store
+      const userRes = await fetch(`/api/user?email=${encodeURIComponent(email)}`);
+      if (userRes.ok) {
+        const userData = await userRes.json();
+        updateUser(userData);
+        login();
+
+        if (userData.onboardingCompleted) {
+          router.push('/dashboard');
+        } else {
+          router.push('/dashboard/onboarding');
+        }
+      } else {
+        router.push('/dashboard');
+      }
+
+    } catch (error) {
+      console.error("Login Error:", error);
+      toast.error("An error occurred", {
+        description: "Please try again later."
+      });
+      setLoading(false);
     }
   };
 
   return (
     <div className="w-full">
       <div className="text-center mb-16">
-        <div className="inline-flex items-center justify-center h-20 w-20 rounded-3xl overflow-hidden bg-white/5 border border-white/10 mb-6 shadow-2xl shadow-white/5 animate-in zoom-in duration-700">
-          <img src="/logo.png" alt="AI Counsellor Logo" className="w-full h-full object-cover" />
-        </div>
+        <Link href="/" className="inline-flex items-center justify-center h-20 w-20 rounded-3xl overflow-hidden bg-white/5 border border-white/10 mb-6 shadow-2xl shadow-white/5 animate-in zoom-in duration-700 hover:scale-105 hover:border-white/20 transition-all relative">
+          <Image src="/logo.png" alt="AI Counsellor Logo" fill sizes="80px" className="object-cover" />
+        </Link>
         <h1 className="text-4xl font-bold text-white mb-3 font-display tracking-tight">
           Welcome Back
         </h1>
@@ -99,7 +130,7 @@ export default function LoginPage() {
               <input type="checkbox" className="mr-3 h-4 w-4 rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-blue-600 transition-all" />
               <span className="text-slate-400 group-hover:text-slate-300 transition-colors">Remember me</span>
             </label>
-            <Link href="#" className="text-blue-500 hover:text-blue-400 transition-colors font-medium">
+            <Link href="/forgot-password" className="text-blue-500 hover:text-blue-400 transition-colors font-medium">
               Forgot password?
             </Link>
           </div>

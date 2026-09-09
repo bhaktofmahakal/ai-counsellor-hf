@@ -8,6 +8,7 @@ export type UserProfile = {
   education: string;
   degree: string;
   gpa: string;
+  gpaScale?: string;
   studyGoal: string; // Bachelors, Masters, etc.
   targetField: string; // CS, Business, etc. (derived from degree usually)
   preferredCountries: string[];
@@ -15,6 +16,9 @@ export type UserProfile = {
   budgetMax: number;
   examStatus: string;
   examScores: string;
+  fundingPlan?: string;
+  sopStatus?: string;
+  targetIntake?: string;
   onboardingCompleted: boolean;
   avatar?: string;
 };
@@ -35,11 +39,15 @@ export type University = {
   strengths: string[];
   website?: string;
   domain?: string;
+  costOfLiving?: number;
+  avgSalary?: number;
+  deadlines?: string;
 };
 
 export type Task = {
   id: string;
   title: string;
+  description?: string;
   completed: boolean;
   priority: 'low' | 'medium' | 'high' | 'critical';
   due: string;
@@ -53,6 +61,10 @@ export type AppStage = 1 | 2 | 3 | 4;
 // 4: Application Prep
 
 interface AppState {
+  // Hydration
+  _hasHydrated: boolean;
+  setHasHydrated: (state: boolean) => void;
+
   // Auth
   isAuthenticated: boolean;
   login: () => void;
@@ -82,6 +94,7 @@ interface AppState {
   setTasks: (tasks: Task[]) => void;
   addTask: (task: Task) => void;
   toggleTask: (id: string) => void;
+  deleteTask: (id: string) => void;
 
   // Computed helpers (not state, but accessible via getters if needed, here we just keep state)
   reset: () => void;
@@ -100,12 +113,18 @@ const INITIAL_USER: UserProfile = {
   budgetMax: 0,
   examStatus: '',
   examScores: '',
+  fundingPlan: '',
+  sopStatus: '',
+  targetIntake: '',
   onboardingCompleted: false,
 };
 
 export const useAppStore = create<AppState>()(
   persist(
     (set, get) => ({
+      _hasHydrated: false,
+      setHasHydrated: (state) => set({ _hasHydrated: state }),
+
       isAuthenticated: false,
       login: () => set({ isAuthenticated: true }),
       logout: () => set({
@@ -130,10 +149,14 @@ export const useAppStore = create<AppState>()(
 
       completeOnboarding: () => set((state) => ({
         user: { ...state.user, onboardingCompleted: true },
-        currentStage: 2 // Move to discovery automatically
+        currentStage: 2, // Move to discovery automatically
+        tasks: state.tasks.map(t => t.stage === 1 ? { ...t, completed: true } : t)
       })),
 
-      setStage: (stage) => set({ currentStage: stage }),
+      setStage: (stage) => set((state) => ({ 
+        currentStage: stage,
+        tasks: state.tasks.map(t => t.stage < stage ? { ...t, completed: true } : t)
+      })),
 
       setUniversities: (universities) => set({ universities }),
 
@@ -147,16 +170,19 @@ export const useAppStore = create<AppState>()(
 
         // Auto-update stage if we have a shortlist and are in stage 2
         let newStage = state.currentStage;
+        let newTasks = state.tasks;
         if (state.currentStage === 2 && newList.length >= 1) {
-          // Just a visual cue, strictly speaking stage 3 is decision time
+          newStage = 3;
+          newTasks = state.tasks.map(t => t.stage < 3 ? { ...t, completed: true } : t);
         }
 
-        return { shortlistedIds: newList };
+        return { shortlistedIds: newList, currentStage: newStage, tasks: newTasks };
       }),
 
       lockUniversity: (id) => set((state) => ({
         lockedUniversityId: id,
         currentStage: 4, // Jump to Application Prep
+        tasks: state.tasks.map(t => t.stage < 4 ? { ...t, completed: true } : t)
         // Add specific tasks for this uni could go here
       })),
 
@@ -167,14 +193,19 @@ export const useAppStore = create<AppState>()(
 
       setTasks: (tasks) => set({ tasks }),
 
-      addTask: (task) => set((state) => ({
-        tasks: [...state.tasks, task]
-      })),
+      addTask: (task) => set((state) => {
+        if (state.tasks.some(t => t.id === task.id)) return state;
+        return { tasks: [...state.tasks, task] };
+      }),
 
       toggleTask: (id) => set((state) => ({
         tasks: state.tasks.map(t =>
           t.id === id ? { ...t, completed: !t.completed } : t
         )
+      })),
+
+      deleteTask: (id) => set((state) => ({
+        tasks: state.tasks.filter(t => t.id !== id)
       })),
 
       reset: () => set({
@@ -188,6 +219,11 @@ export const useAppStore = create<AppState>()(
     {
       name: 'ai-counsellor-storage', // name of the item in the storage (must be unique)
       storage: createJSONStorage(() => localStorage), // (optional) by default, 'localStorage' is used
+      onRehydrateStorage: () => {
+        return (state) => {
+          state?.setHasHydrated(true);
+        };
+      }
     }
   )
 );

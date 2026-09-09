@@ -2,12 +2,23 @@ import { prisma } from './prisma';
 
 interface UserProfile {
   gpa?: string | null;
+  gpaScale?: string | null;
   budgetMin?: number;
   budgetMax?: number;
   preferredCountries?: string[];
   studyGoal?: string | null;
   targetField?: string | null;
   examScores?: string | null;
+}
+
+function normalizeGPA(gpa: string | null | undefined, scale: string | null | undefined): number {
+  if (!gpa) return 0;
+  const val = parseFloat(gpa);
+  if (isNaN(val)) return 0;
+
+  if (scale === '10') return (val / 10) * 4;
+  if (scale === 'percentage' || val > 10) return (val / 100) * 4;
+  return val; // Default to 4.0 scale
 }
 
 export async function recalculateUniversityMatches(userId: string) {
@@ -20,7 +31,7 @@ export async function recalculateUniversityMatches(userId: string) {
 export function calculateMatchScore(user: UserProfile, university: any): number {
   let score = 0;
 
-  const gpaValue = parseFloat(user.gpa || '0');
+  const gpaValue = normalizeGPA(user.gpa, user.gpaScale);
   const userBudgetMax = user.budgetMax || 0;
 
   if (gpaValue >= 3.8 && university.rank && university.rank <= 10) {

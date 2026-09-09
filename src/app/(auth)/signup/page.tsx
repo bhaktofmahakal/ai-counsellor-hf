@@ -8,6 +8,8 @@ import { GradientButton } from '@/components/lightswind/gradient-button';
 import { Card } from '@/components/lightswind/card';
 import { Input } from '@/components/lightswind/input';
 import { ArrowRight, Sparkles } from 'lucide-react';
+import Image from 'next/image';
+import { toast } from 'sonner';
 import { useAppStore } from '@/lib/store';
 
 export default function SignupPage() {
@@ -35,21 +37,69 @@ export default function SignupPage() {
     e.preventDefault();
 
     if (formData.password !== formData.confirmPassword) {
-      alert('Passwords do not match');
+      toast.error("Passwords mismatch", {
+        description: "The passwords you entered do not match. Please verify and try again."
+      });
+      setLoading(false);
+      return;
+    }
+
+    if (formData.password.length < 6) {
+      toast.error("Weak password", {
+        description: "Password must be at least 6 characters long."
+      });
+      setLoading(false);
       return;
     }
 
     setLoading(true);
-    await new Promise(resolve => setTimeout(resolve, 1000));
 
-    // Mock Signup
-    updateUser({
-      name: formData.name,
-      email: formData.email
-    });
-    login(); // Set authenticated
+    try {
+      // Create user in DB with password
+      const res = await fetch('/api/user', {
+        method: 'POST', // Changed from PATCH
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: formData.email,
+          name: formData.name,
+          password: formData.password
+        })
+      });
 
-    router.push('/dashboard/onboarding');
+      if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.error || "Failed to create account");
+      }
+
+      // Automatically sign in after signup
+      const loginResult = await signIn('credentials', {
+        redirect: false,
+        email: formData.email,
+        password: formData.password,
+      });
+
+      if (loginResult?.error) {
+        throw new Error("Account created but sign-in failed. Please login manually.");
+      }
+
+      const userData = await res.json();
+
+      // Update store and navigate
+      updateUser(userData);
+      login();
+
+      toast.success("Account created!", {
+        description: "Your study abroad journey begins here."
+      });
+
+      router.push('/dashboard/onboarding');
+    } catch (e: any) {
+      console.error("Signup error:", e);
+      toast.error("Registration failed", {
+        description: e.message || "An unexpected error occurred during signup."
+      });
+      setLoading(false);
+    }
   };
 
   const updateField = (field: string, value: string) => {
@@ -59,9 +109,9 @@ export default function SignupPage() {
   return (
     <div className="w-full">
       <div className="text-center mb-16">
-        <div className="inline-flex items-center justify-center h-20 w-20 rounded-3xl overflow-hidden bg-white/5 border border-white/10 mb-6 shadow-2xl shadow-white/5 animate-in zoom-in duration-700">
-          <img src="/logo.png" alt="AI Counsellor Logo" className="w-full h-full object-cover" />
-        </div>
+        <Link href="/" className="inline-flex items-center justify-center h-20 w-20 rounded-3xl overflow-hidden bg-white/5 border border-white/10 mb-6 shadow-2xl shadow-white/5 animate-in zoom-in duration-700 hover:scale-105 hover:border-white/20 transition-all relative">
+          <Image src="/logo.png" alt="AI Counsellor Logo" fill sizes="80px" className="object-cover" />
+        </Link>
         <h1 className="text-4xl font-bold text-white mb-3 font-display tracking-tight">
           Create Account
         </h1>

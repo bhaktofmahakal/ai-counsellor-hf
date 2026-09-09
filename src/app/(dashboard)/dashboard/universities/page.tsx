@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAppStore, University } from '@/lib/store';
+import { toast } from 'sonner';
 import {
   Heart,
   MapPin,
@@ -111,15 +112,21 @@ export default function UniversitiesPage() {
         if (data.action === 'added') {
           setShortlistedIds([...shortlistedIds, universityId]);
           if (data.newStage) setStage(data.newStage);
-          alert(`✅ ${data.shortlist.university.name} shortlisted! ${data.tasksCreated} specialized tasks have been added to your preparation list.`);
+          toast.success(`Great start! You've shortlisted ${data.shortlist.university.name}`, {
+            description: `${data.tasksCreated} specialized tasks added to your preparation list`,
+            action: {
+              label: 'Go to Shortlist →',
+              onClick: () => router.push('/dashboard/shortlist'),
+            },
+          });
         } else {
           setShortlistedIds(shortlistedIds.filter(id => id !== universityId));
-          alert('❌ Removed from shortlist');
+          toast.success('Removed from shortlist');
         }
       }
     } catch (error) {
       console.error('Error toggling shortlist:', error);
-      alert('Failed to update shortlist');
+      toast.error('Failed to update shortlist');
     } finally {
       setShortlistLoading(null);
     }
@@ -131,44 +138,49 @@ export default function UniversitiesPage() {
     }
 
     try {
-      const response = await fetch('/api/user', {
-        method: 'PATCH',
+      const response = await fetch('/api/shortlist/lock', {
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          email: user.email,
-          lockedUniversityId: id,
-          currentStage: 4,
+          universityId: id,
         }),
       });
 
       if (response.ok) {
         lockUniversity(id);
         setStage(4);
-        router.push('/dashboard');
+        toast.success('University locked! Application Guidance is now unlocked.');
+        router.push('/dashboard/tasks');
+      } else {
+        const data = await response.json();
+        toast.error(data.error || 'Failed to lock university');
       }
     } catch (error) {
       console.error('Error locking university:', error);
+      toast.error('An error occurred while locking the university');
     }
   };
 
   const handleUnlock = async () => {
+    if (!confirm('Are you sure you want to unlock? Your current progress in the Application phase will be preserved, but you will return to the Finalizing stage.')) {
+      return;
+    }
+
     try {
-      const response = await fetch('/api/user', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: user.email,
-          lockedUniversityId: null,
-          currentStage: 3,
-        }),
+      const response = await fetch('/api/shortlist/lock', {
+        method: 'DELETE',
       });
 
       if (response.ok) {
         unlockUniversity();
         setStage(3);
+        toast.success('University unlocked');
+      } else {
+        toast.error('Failed to unlock university');
       }
     } catch (error) {
       console.error('Error unlocking university:', error);
+      toast.error('An error occurred while unlocking the university');
     }
   };
 
@@ -437,16 +449,12 @@ export default function UniversitiesPage() {
                 </div>
 
                 <div className="flex gap-3">
-                  {uni.website && (
-                    <a
-                      href={uni.website}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex-1 py-2.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-white font-medium text-sm transition-colors text-center"
-                    >
-                      View Website
-                    </a>
-                  )}
+                  <Link
+                    href={`/dashboard/universities/${uni.id}`}
+                    className="flex-1 py-2.5 rounded-lg bg-teal-600 hover:bg-teal-500 text-white font-medium text-sm transition-colors text-center shadow-lg shadow-teal-600/20"
+                  >
+                    View Details
+                  </Link>
 
                   {isLocked ? (
                     <button

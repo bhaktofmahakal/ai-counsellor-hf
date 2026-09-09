@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { usePathname, useRouter } from 'next/navigation';
 import { useAppStore } from '@/lib/store';
 import { useSession, signOut } from 'next-auth/react';
@@ -13,9 +14,14 @@ import {
   LogOut,
   Menu,
   X,
-  Sparkles
+  Sparkles,
+  FileText,
+  Bookmark,
+  FileCheck
 } from 'lucide-react';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/lightswind/avatar';
+import { Button } from '@/components/lightswind/button';
+import { Card } from '@/components/lightswind/card';
 
 export default function DashboardLayout({
   children,
@@ -26,6 +32,7 @@ export default function DashboardLayout({
   const router = useRouter();
   const { data: session, status } = useSession();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [isDataLoaded, setIsDataLoaded] = useState(false);
   const {
     user,
@@ -34,37 +41,60 @@ export default function DashboardLayout({
     updateUser,
     setUniversities,
     setTasks,
+    shortlistedIds,
     setShortlistedIds,
     setStage,
-    lockUniversity
+    lockUniversity,
+    _hasHydrated,
+    logout
   } = useAppStore();
 
   useEffect(() => {
-    // Wait for session and data to load
-    if (status === 'loading') return;
+    // Wait for session and store hydration
+    if (status === 'loading' || !_hasHydrated) return;
     if (!isDataLoaded && isAuthenticated) return;
 
-    // 1. Auth check
-    if (status === 'unauthenticated' && !isAuthenticated) {
+    // 1. Auth check: NextAuth status is the source of truth for the server
+    if (status === 'unauthenticated') {
+      // If we are unauthenticated in NextAuth, we must be unauthenticated in Zustand too
+      if (isAuthenticated) {
+        console.log('🔄 [DashboardLayout] Session lost, logging out of store');
+        logout();
+      }
       router.push('/login');
       return;
     }
 
     // 2. Onboarding check: if not onboarded and not on onboarding page, redirect
-    if (isDataLoaded && !user.onboardingCompleted && pathname !== '/dashboard/onboarding') {
-      router.push('/dashboard/onboarding');
+    // Use both store and session as source of truth to be resilient
+    const isOnboardingCompleted = user.onboardingCompleted || (session?.user as any)?.onboardingCompleted;
+    const isActuallyLoaded = isDataLoaded && (user.email === session?.user?.email);
+
+    // FIX: Only redirect if we are SURE about the onboarding status
+    if (status === 'authenticated' && isActuallyLoaded) {
+      if (!isOnboardingCompleted && pathname !== '/dashboard/onboarding') {
+        console.log('🚀 [DashboardLayout] Redirecting to onboarding');
+        router.replace('/dashboard/onboarding');
+        return;
+      }
+      if (isOnboardingCompleted && pathname === '/dashboard/onboarding') {
+        console.log('✅ [DashboardLayout] Already onboarded, moving to dashboard');
+        router.replace('/dashboard');
+        return;
+      }
     }
-  }, [status, isAuthenticated, user.onboardingCompleted, pathname, router, isDataLoaded]);
+  }, [status, isAuthenticated, user.onboardingCompleted, (session?.user as any)?.onboardingCompleted, pathname, router, isDataLoaded]);
 
   const lastLoadedEmail = useRef<string | null>(null);
 
   useEffect(() => {
     const loadData = async () => {
-      // Use session email as source of truth
-      const activeEmail = session?.user?.email || user.email;
+      // Use session email as source of truth. 
+      // Strictly require NextAuth session for API calls to avoid 401s.
+      const activeEmail = session?.user?.email;
 
       if (!activeEmail || status !== 'authenticated') {
-        if (status === 'unauthenticated') setIsDataLoaded(true);
+        if (status !== 'loading') setIsDataLoaded(true);
         return;
       }
 
@@ -102,12 +132,21 @@ export default function DashboardLayout({
               }
             }
           }
+        } else if (userRes.status === 404) {
+          // New user or not found, proceed to onboarding naturally
+          console.log('ℹ️ [DashboardLayout] User not found, initializing store with session data');
+          updateUser({ email: activeEmail, name: session.user.name || 'Student' });
+        } else if (userRes.status === 401) {
+          console.error('❌ [DashboardLayout] User API failed: 401 Unauthorized. Session may be invalid.');
+          logout();
+          router.push('/login');
         } else {
           console.error('❌ [DashboardLayout] User API failed:', userRes.status);
         }
 
         if (universitiesRes.ok) {
-          setUniversities(await universitiesRes.json());
+          const unis = await universitiesRes.json();
+          setUniversities(Array.isArray(unis) ? unis : []);
         }
       } catch (error) {
         console.error('❌ [DashboardLayout] Data loading error:', error);
@@ -122,8 +161,16 @@ export default function DashboardLayout({
   }, [session?.user?.email, status, isDataLoaded]);
 
   const isOnboarding = pathname === '/dashboard/onboarding';
+  const isOnboardingCompleted = user.onboardingCompleted || (session?.user as any)?.onboardingCompleted;
 
-  if (status === 'loading') {
+  // Robust loading check: must be hydrated AND (data loaded for the CURRENT session user)
+  const isCorrectUserLoaded = isDataLoaded && user.email === session?.user?.email;
+  const isActuallyLoaded = _hasHydrated && (status === 'authenticated' ? isCorrectUserLoaded : true);
+
+  const isRedirecting = status === 'authenticated' && isActuallyLoaded && !isOnboardingCompleted && !isOnboarding;
+  const isRedirectingAway = status === 'authenticated' && isActuallyLoaded && isOnboardingCompleted && isOnboarding;
+
+  if (status === 'loading' || !_hasHydrated || (status === 'authenticated' && !isActuallyLoaded) || isRedirecting || isRedirectingAway) {
     return (
       <div className="min-h-screen bg-slate-950 flex items-center justify-center">
         <div className="h-8 w-8 rounded-full border-2 border-blue-600 border-t-transparent animate-spin" />
@@ -141,10 +188,12 @@ export default function DashboardLayout({
 
   const navigation = [
     { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
-    { name: 'Universities', href: '/dashboard/universities', icon: GraduationCap },
-    { name: 'AI Counsellor', href: '/dashboard/ai-counsellor', icon: MessageSquare },
-    { name: 'Tasks', href: '/dashboard/tasks', icon: CheckSquare },
     { name: 'Profile', href: '/dashboard/profile', icon: User },
+    { name: 'Universities', href: '/dashboard/universities', icon: GraduationCap },
+    { name: 'Shortlist', href: '/dashboard/shortlist', icon: Bookmark },
+    { name: 'Tasks & Guidance', href: '/dashboard/tasks', icon: CheckSquare },
+    { name: 'Documents', href: '/dashboard/documents', icon: FileText },
+    { name: 'AI Counsellor', href: '/dashboard/ai-counsellor', icon: MessageSquare },
   ];
 
   return (
@@ -154,8 +203,8 @@ export default function DashboardLayout({
       {/* Mobile Header */}
       <div className="lg:hidden fixed top-0 w-full z-50 px-4 py-3 bg-slate-950/80 backdrop-blur-lg border-b border-slate-800 flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <div className="h-8 w-8 rounded-lg overflow-hidden bg-white/5 border border-white/10 flex items-center justify-center shadow-lg shadow-white/5">
-            <img src="/logo.png" alt="AI Counsellor Logo" className="w-full h-full object-cover" />
+          <div className="h-8 w-8 rounded-lg overflow-hidden bg-white/5 border border-white/10 flex items-center justify-center shadow-lg shadow-white/5 relative">
+            <Image src="/logo.png" alt="AI Counsellor Logo" fill sizes="32px" className="object-cover" />
           </div>
           <span className="font-display font-bold text-lg">AI Counsellor</span>
         </div>
@@ -165,15 +214,23 @@ export default function DashboardLayout({
       </div>
 
       <div className="flex pt-16 lg:pt-0 min-h-screen">
+        {/* Mobile Sidebar Backdrop */}
+        {sidebarOpen && (
+          <div
+            className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm z-30 lg:hidden transition-opacity duration-300"
+            onClick={() => setSidebarOpen(false)}
+          />
+        )}
+
         {/* Sidebar */}
         <aside
-          className={`fixed inset-y-0 left-0 z-40 w-72 bg-slate-950 border-r border-slate-800/50 transform transition-transform duration-300 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'
-            } lg:translate-x-0 lg:static`}
+          className={`fixed inset-y-0 left-0 z-40 w-72 bg-slate-950 border-r border-slate-800/50 transform transition-transform duration-300 ease-in-out ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'
+            } lg:translate-x-0 lg:static h-full`}
         >
           <div className="flex flex-col h-full p-6">
             <div className="hidden lg:flex items-center gap-3 mb-10 px-2">
-              <div className="h-10 w-10 rounded-xl overflow-hidden bg-white/5 border border-white/10 flex items-center justify-center shadow-lg shadow-white/5">
-                <img src="/logo.png" alt="AI Counsellor Logo" className="w-full h-full object-cover" />
+              <div className="h-10 w-10 rounded-xl overflow-hidden bg-white/5 border border-white/10 flex items-center justify-center shadow-lg shadow-white/5 relative">
+                <Image src="/logo.png" alt="AI Counsellor Logo" fill sizes="40px" className="object-cover" />
               </div>
               <div>
                 <h2 className="font-display font-bold text-lg leading-tight">AI Counsellor</h2>
@@ -184,6 +241,7 @@ export default function DashboardLayout({
             <nav className="flex-1 space-y-2">
               {navigation.map((item) => {
                 const isActive = pathname === item.href;
+                const showBadge = item.name === 'Shortlist' && shortlistedIds.length > 0;
                 return (
                   <Link
                     key={item.name}
@@ -199,6 +257,11 @@ export default function DashboardLayout({
                     )}
                     <item.icon className={`h-5 w-5 relative z-10 transition-colors ${isActive ? 'text-blue-400' : 'group-hover:text-blue-400'}`} />
                     <span className="relative z-10 font-medium">{item.name}</span>
+                    {showBadge && (
+                      <span className="relative z-10 ml-auto px-2 py-0.5 bg-yellow-500 text-slate-900 text-xs font-bold rounded-full">
+                        {shortlistedIds.length}
+                      </span>
+                    )}
                     {isActive && (
                       <div className="absolute right-2 h-1.5 w-1.5 rounded-full bg-blue-600 shadow-[0_0_8px_rgba(37,99,235,0.6)]" />
                     )}
@@ -207,10 +270,10 @@ export default function DashboardLayout({
               })}
             </nav>
 
-            <div className="mt-auto space-y-6">
+            <div className="mt-auto space-y-8 pt-8 border-t border-slate-800/30">
               {/* Stage Progress */}
               <div className="px-2">
-                <div className="flex justify-between items-center mb-2">
+                <div className="flex justify-between items-center mb-3">
                   <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Journey Progress</span>
                   <span className="text-[10px] font-bold text-blue-400">Stage {currentStage}/4</span>
                 </div>
@@ -241,7 +304,7 @@ export default function DashboardLayout({
                     <p className="text-xs text-slate-500 truncate">{user.email || 'john@example.com'}</p>
                   </div>
                   <button
-                    onClick={() => signOut({ callbackUrl: '/' })}
+                    onClick={() => setShowLogoutModal(true)}
                     className="text-slate-500 hover:text-blue-400 transition-colors"
                   >
                     <LogOut className="h-4 w-4" />
@@ -252,12 +315,48 @@ export default function DashboardLayout({
           </div>
         </aside>
 
-        <main className="flex-1 p-6 lg:p-10 overflow-y-auto">
-          <div className="max-w-6xl mx-auto space-y-8">
+        <main className={`flex-1 overflow-y-auto ${pathname === '/dashboard/ai-counsellor' ? 'p-0' : 'p-3 sm:p-4 lg:p-6'}`}>
+          <div className={`${pathname === '/dashboard/ai-counsellor' ? 'max-w-full h-full' : 'max-w-6xl space-y-4'} mx-auto`}>
             {children}
           </div>
         </main>
       </div>
+
+      {/* Logout Confirmation Modal */}
+      {showLogoutModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+          <Card className="max-w-md w-full p-8 bg-slate-900 border-white/10 shadow-2xl relative overflow-hidden">
+            <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-red-500 to-amber-500" />
+            <div className="text-center">
+              <div className="w-16 h-16 bg-red-500/10 rounded-full flex items-center justify-center mx-auto mb-4">
+                <LogOut className="w-8 h-8 text-red-500" />
+              </div>
+              <h3 className="text-2xl font-bold text-white mb-2">Logout</h3>
+              <p className="text-slate-400 mb-8">
+                Are you sure you want to log out of AI Counsellor? Your progress is saved.
+              </p>
+              <div className="flex gap-3">
+                <Button
+                  onClick={() => setShowLogoutModal(false)}
+                  variant="outline"
+                  className="flex-1 border-white/10 hover:bg-white/5"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  onClick={async () => {
+                    logout();
+                    await signOut({ callbackUrl: '/' });
+                  }}
+                  className="flex-1 bg-red-600 hover:bg-red-700 text-white shadow-lg shadow-red-600/20"
+                >
+                  Logout
+                </Button>
+              </div>
+            </div>
+          </Card>
+        </div>
+      )}
     </div>
   );
 }

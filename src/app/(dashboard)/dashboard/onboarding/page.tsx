@@ -7,6 +7,7 @@ import { Card } from '@/components/lightswind/card';
 import { Input } from '@/components/lightswind/input';
 import { ConfettiButton } from '@/components/lightswind/confetti-button';
 import { ChevronLeft, ChevronRight, Sparkles, MessageSquare, User as UserIcon, Send, Loader2, CheckSquare, Mic, MicOff, Volume2, VolumeX } from 'lucide-react';
+import { toast } from 'sonner';
 import { useAppStore } from '@/lib/store';
 
 type Message = {
@@ -19,6 +20,7 @@ type OnboardingFormData = {
   education: string;
   degree: string;
   gpa: string;
+  gpaScale: '4' | '10' | 'percentage';
   studyGoal: string;
   preferredCountries: string[];
   budgetMin: string;
@@ -40,21 +42,82 @@ export default function OnboardingPage() {
   const [aiInput, setAiInput] = useState('');
   const [isListening, setIsListening] = useState(false);
   const [isSpeechEnabled, setIsSpeechEnabled] = useState(true);
+  const [currentAudio, setCurrentAudio] = useState<HTMLAudioElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  const speak = (text: string) => {
+  const speak = async (text: string) => {
     if (!isSpeechEnabled || typeof window === 'undefined') return;
+
+    // Stop current audio or speech
+    if (currentAudio) {
+      currentAudio.pause();
+      currentAudio.src = '';
+    }
     window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(text);
-    const voices = window.speechSynthesis.getVoices();
-    const preferredVoice = voices.find(v => v.lang.startsWith('en') && (v.name.includes('Google') || v.name.includes('Neural')));
-    if (preferredVoice) utterance.voice = preferredVoice;
-    window.speechSynthesis.speak(utterance);
+
+    const cleanSpeechText = text
+      .replace(/[*#_`~]/g, '')
+      .replace(/\[ACTION:[\s\S]*?\]/gi, '')
+      .replace(/\[DATA:[\s\S]*?\{[\s\S]*?\}\s*\]/gi, '')
+      .replace(/=/g, ' is ')
+      .trim();
+
+    if (!cleanSpeechText) return;
+
+    try {
+      // 1. Try ElevenLabs via our API
+      const response = await fetch('/api/ai/tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: cleanSpeechText }),
+      });
+
+      if (!response.ok) throw new Error('ElevenLabs Failed');
+
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+
+      audio.onended = () => {
+        URL.revokeObjectURL(url); // Clean up memory leak
+        setCurrentAudio(null);
+      };
+
+      setCurrentAudio(audio);
+      audio.play();
+    } catch (e) {
+      console.warn('⚠️ ElevenLabs failed or limit reached, falling back to browser TTS');
+
+      const utterance = new SpeechSynthesisUtterance(cleanSpeechText);
+      utterance.rate = 1.05;
+      utterance.pitch = 1.0;
+      utterance.volume = 0.9;
+
+      const voices = window.speechSynthesis.getVoices();
+      const preferredVoice = voices.find(v => v.lang.startsWith('en') && (v.name.includes('Google') || v.name.includes('Natural') || v.name.includes('Premium')));
+      if (preferredVoice) utterance.voice = preferredVoice;
+
+      utterance.onend = () => setCurrentAudio(null);
+      window.speechSynthesis.speak(utterance);
+    }
   };
+
+  // Fixed: Stop talking if user toggles speech OFF manually
+  useEffect(() => {
+    if (!isSpeechEnabled && typeof window !== 'undefined') {
+      window.speechSynthesis.cancel();
+      if (currentAudio) {
+        currentAudio.pause();
+        currentAudio.src = '';
+      }
+    }
+  }, [isSpeechEnabled, currentAudio]);
 
   const startListening = () => {
     if (!('webkitSpeechRecognition' in window) && !('speechRecognition' in window)) {
-      alert('Speech recognition is not supported in this browser.');
+      toast.error('Speech recognition is not supported in this browser.', {
+        description: 'Try using Chrome or Edge for the best experience.'
+      });
       return;
     }
 
@@ -87,6 +150,7 @@ export default function OnboardingPage() {
     education: user.education || '',
     degree: user.degree || '',
     gpa: user.gpa || '',
+    gpaScale: '4', // Default to 4.0 scale
     studyGoal: user.studyGoal || '',
     preferredCountries: user.preferredCountries || [],
     budgetMin: user.budgetMin ? user.budgetMin.toString() : '',
@@ -115,21 +179,33 @@ export default function OnboardingPage() {
     }
   };
 
-  const validateStep = (step: number) => {
+  const validateStep = (step: number, all = false) => {
     const newErrors: Record<string, string> = {};
-    if (step === 0) {
+
+    // Validate Academic Background (Step 0)
+    if (all || step === 0) {
       if (!data.education) newErrors.education = 'Required';
       if (!data.degree) newErrors.degree = 'Required';
       if (!data.gpa) newErrors.gpa = 'Required';
-    } else if (step === 1) {
+    }
+
+    // Validate Study Goals (Step 1)
+    if (all || step === 1) {
       if (!data.studyGoal) newErrors.studyGoal = 'Required';
       if (data.preferredCountries.length === 0) newErrors.preferredCountries = 'Select at least one country';
-    } else if (step === 2) {
+    }
+
+    // Validate Budget (Step 2)
+    if (all || step === 2) {
       if (!data.budgetMin) newErrors.budgetMin = 'Required';
       if (!data.budgetMax) newErrors.budgetMax = 'Required';
-    } else if (step === 3) {
+    }
+
+    // Validate Exams (Step 3)
+    if (all || step === 3) {
       if (!data.examStatus) newErrors.examStatus = 'Required';
     }
+
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -149,7 +225,25 @@ export default function OnboardingPage() {
   };
 
   const handleComplete = async () => {
-    if (!validateStep(3)) return;
+    let isValid = false;
+
+    if (mode === 'form') {
+      isValid = validateStep(3, true);
+    } else {
+      // AI Mode: Perform minimal critical-data check
+      isValid = !!(data.education && data.studyGoal && data.preferredCountries.length > 0);
+      if (!isValid) {
+        // Fallback to full validation to show specific errors
+        isValid = validateStep(3, true);
+      }
+    }
+
+    if (!isValid) {
+      toast.error('Missing Profile Information', {
+        description: 'Please complete or verify your information before proceeding.'
+      });
+      return;
+    }
 
     setIsTyping(true); // Show loading state
 
@@ -173,11 +267,11 @@ export default function OnboardingPage() {
         completeOnboarding();
         router.push('/dashboard');
       } else {
-        alert('Failed to save profile. Please try again.');
+        toast.error('Failed to save profile. Please try again.');
       }
     } catch (error) {
       console.error('Error saving onboarding data:', error);
-      alert('An error occurred. Please try again.');
+      toast.error('An unexpected error occurred. Please try again.');
     } finally {
       setIsTyping(false);
     }
@@ -201,7 +295,7 @@ export default function OnboardingPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message: userMessage,
-          conversationHistory: aiMessages.map(m => ({ role: m.role, content: m.content })),
+          conversationHistory: [...aiMessages, { role: 'user', content: userMessage }].map(m => ({ role: m.role, content: m.content })),
         }),
       });
 
@@ -225,28 +319,54 @@ export default function OnboardingPage() {
             if (dataStr === '[DONE]') {
               setIsTyping(false);
 
-              // Handle data extraction
-              const dataMatch = accumulatedContent.match(/\[DATA:\s*({[^\]]+})\]/);
+              // Handle data extraction with a more robust multi-line regex
+              const dataMatch = accumulatedContent.match(/\[DATA:\s*(\{[\s\S]*?\})\s*\]/m);
+
               if (dataMatch) {
                 try {
                   const extractedData = JSON.parse(dataMatch[1]);
                   console.log('Parsed AI Onboarding Data:', extractedData);
 
                   // Update form data with extracted info
-                  setData(prev => ({
-                    ...prev,
-                    ...extractedData,
-                    budgetMax: extractedData.budgetMax?.toString() || prev.budgetMax,
-                    preferredCountries: extractedData.preferredCountries || prev.preferredCountries,
-                  }));
+                  setData(prev => {
+                    const newData = {
+                      ...prev,
+                      ...extractedData,
+                      budgetMax: extractedData.budgetMax?.toString() || prev.budgetMax,
+                      preferredCountries: extractedData.preferredCountries || prev.preferredCountries,
+                    };
 
-                  setAiStep(6); // Finalize
+                    // BACKGROUND SAVE: Persist AI findings immediately
+                    fetch('/api/user', {
+                      method: 'PATCH',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        email: user.email,
+                        ...extractedData,
+                        budgetMin: parseInt(extractedData.budgetMin || prev.budgetMin) || 0,
+                        budgetMax: parseInt(extractedData.budgetMax || prev.budgetMax) || 0,
+                      }),
+                    }).catch(err => console.error('Silent background save failed:', err));
+
+                    return newData;
+                  });
+
+                  setAiStep(6); // Finalize and show "Enter Mission Control"
                 } catch (e) {
                   console.error('Error parsing extracted data:', e);
                 }
+              } else if (
+                aiMessages.length > 6 && // Minimum conversation turns
+                (accumulatedContent.toLowerCase().includes('mission control complete') ||
+                  accumulatedContent.toLowerCase().includes('onboarding complete') ||
+                  accumulatedContent.toLowerCase().includes('all set')) &&
+                data.education && data.studyGoal && data.preferredCountries.length > 0
+              ) {
+                // Safety fallback: only if we have the critical data and specific phrases
+                setAiStep(6);
               }
 
-              const textToSpeak = accumulatedContent.replace(/\[DATA:\s*({[^\]]+})\]/, '').trim();
+              const textToSpeak = accumulatedContent.replace(/\[DATA:[\s\S]*?\{[\s\S]*?\}\s*\]/gi, '').trim();
               speak(textToSpeak);
               break;
             }
@@ -315,18 +435,34 @@ export default function OnboardingPage() {
             {errors.degree && <p className="mt-1 text-xs text-red-500">{errors.degree}</p>}
           </div>
 
-          <div>
-            <label className="block text-sm font-medium text-slate-400 mb-2">
-              GPA / Percentage <span className="text-red-500">*</span>
-            </label>
-            <Input
-              type="text"
-              placeholder="e.g., 3.8 / 85%"
-              value={data.gpa}
-              onChange={(e) => updateField('gpa', e.target.value)}
-              className={`w-full bg-slate-900/50 ${errors.gpa ? 'border-red-500' : 'border-white/10'} text-white`}
-            />
-            {errors.gpa && <p className="mt-1 text-xs text-red-500">{errors.gpa}</p>}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-slate-400 mb-2">
+                GPA / Percentage <span className="text-red-500">*</span>
+              </label>
+              <Input
+                type="text"
+                placeholder={data.gpaScale === 'percentage' ? "e.g., 85" : "e.g., 3.8"}
+                value={data.gpa}
+                onChange={(e) => updateField('gpa', e.target.value)}
+                className={`w-full bg-slate-900/50 ${errors.gpa ? 'border-red-500' : 'border-white/10'} text-white`}
+              />
+              {errors.gpa && <p className="mt-1 text-xs text-red-500">{errors.gpa}</p>}
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-400 mb-2">
+                Scale
+              </label>
+              <select
+                value={data.gpaScale}
+                onChange={(e) => updateField('gpaScale', e.target.value as any)}
+                className="w-full px-3 py-2 bg-slate-900/50 border border-white/10 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-600/50"
+              >
+                <option value="4">4.0 Scale</option>
+                <option value="10">10.0 Scale</option>
+                <option value="percentage">Percentage (%)</option>
+              </select>
+            </div>
           </div>
         </div>
       ),
@@ -576,7 +712,7 @@ export default function OnboardingPage() {
                         ? 'bg-slate-900/50 text-slate-200 border border-white/5 rounded-tl-sm'
                         : 'bg-blue-600 text-white rounded-tr-sm'
                         }`}>
-                        {msg.content.replace(/\[DATA:\s*({[^\]]+})\]/, '').trim()}
+                        {msg.content.replace(/\[DATA:[\s\S]*?\{[\s\S]*?\}\s*\]/gi, '').trim()}
                       </div>
                     </div>
                   ))}

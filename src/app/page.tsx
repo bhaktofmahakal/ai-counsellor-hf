@@ -2,7 +2,11 @@
 
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { TextGenerateEffect } from "@/components/ui/text-generate-effect";
+import Image from 'next/image';
+import dynamic from 'next/dynamic';
+import { cn } from '@/lib/utils';
+
+// Icons
 import {
   ArrowRight,
   Sparkles,
@@ -27,16 +31,34 @@ import {
   Award,
   Minus
 } from 'lucide-react';
-import { AuroraBackground } from '@/components/lightswind/aurora-background';
+
+import {
+  SiOpenai,
+  SiNextdotjs,
+  SiPrisma,
+  SiTailwindcss,
+  SiVercel,
+  SiUpstash,
+  SiGooglecloud
+} from "react-icons/si";
+
+// Dynamic Imports for Performance
+const TextGenerateEffect = dynamic(() => import("@/components/ui/text-generate-effect").then(mod => mod.TextGenerateEffect), { ssr: false });
+const AuroraBackground = dynamic(() => import('@/components/lightswind/aurora-background').then(mod => mod.AuroraBackground), { ssr: false });
+const BentoGrid = dynamic(() => import('@/components/lightswind/bento-grid').then(mod => mod.BentoGrid), { ssr: false });
+const SlidingLogoMarquee = dynamic(() => import('@/components/lightswind/sliding-logo-marquee').then(mod => mod.SlidingLogoMarquee), { ssr: false });
+const ThreeDScrollTriggerContainer = dynamic(() => import('@/components/lightswind/threed-scroll-trigger').then(mod => mod.ThreeDScrollTriggerContainer), { ssr: false });
+const ThreeDScrollTriggerRow = dynamic(() => import('@/components/lightswind/threed-scroll-trigger').then(mod => mod.ThreeDScrollTriggerRow), { ssr: false });
+const LightRays = dynamic(() => import('@/components/lightswind/light-rays'), { ssr: false });
+
+// Components
 import { GradientButton } from '@/components/lightswind/gradient-button';
 import { CountUp } from '@/components/lightswind/count-up';
-import { BentoGrid } from '@/components/lightswind/bento-grid';
 import { ShinyText } from '@/components/lightswind/shiny-text';
 import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from '@/components/lightswind/accordion';
-import { SlidingLogoMarquee } from '@/components/lightswind/sliding-logo-marquee';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/lightswind/avatar';
-import { ThreeDScrollTriggerContainer, ThreeDScrollTriggerRow } from '@/components/lightswind/threed-scroll-trigger';
-import LightRays from '@/components/lightswind/light-rays';
+import { Footer } from '@/components/ui/footer';
+
 import {
   Navbar,
   NavBody,
@@ -48,8 +70,16 @@ import {
   MobileNavToggle,
   MobileNavMenu
 } from '@/components/ui/resizable-navbar';
-import { cn } from '@/lib/utils';
-import { Footer } from '@/components/ui/footer';
+
+import { HoveredLink, Menu, MenuItem, ProductItem } from "@/components/ui/navbar-menu";
+import { HeroParallax } from "@/components/ui/hero-parallax";
+import { FlipWords } from "@/components/ui/flip-words";
+import { HoverBorderGradient } from "@/components/ui/hover-border-gradient";
+import MagicBento from "@/components/ui/MagicBento";
+import LogoLoop from "@/components/ui/LogoLoop";
+import LiquidChrome from "@/components/ui/LiquidChrome";
+import WebcamPixelGrid from "@/components/ui/webcam-pixel-grid";
+
 
 const testimonials = [
   {
@@ -120,27 +150,6 @@ const FeatureCard = ({ icon: Icon, title, description, colorClass }: { icon: any
   </div>
 );
 
-// --- Main Page ---
-
-import { HoveredLink, Menu, MenuItem, ProductItem } from "@/components/ui/navbar-menu";
-import { HeroParallax } from "@/components/ui/hero-parallax";
-import { FlipWords } from "@/components/ui/flip-words";
-import { HoverBorderGradient } from "@/components/ui/hover-border-gradient";
-import MagicBento from "@/components/ui/MagicBento";
-import LogoLoop from "@/components/ui/LogoLoop";
-import LiquidChrome from "@/components/ui/LiquidChrome";
-import WebcamPixelGrid from "@/components/ui/webcam-pixel-grid";
-import {
-  SiOpenai,
-  SiNextdotjs,
-  SiPrisma,
-  SiTailwindcss,
-  SiVercel,
-  SiUpstash,
-  SiGooglecloud
-} from "react-icons/si";
-
-
 const techLogos = [
   { node: <SiOpenai />, title: "OpenAI" },
   { node: <SiNextdotjs />, title: "Next.js" },
@@ -178,8 +187,8 @@ export default function LandingPage() {
         <NavBody>
           <NavbarLogo>
             <Link href="/" className="flex items-center gap-2 group">
-              <div className="h-10 w-10 rounded-xl overflow-hidden bg-white/5 border border-white/10 flex items-center justify-center shadow-lg shadow-white/5 group-hover:scale-110 transition-transform">
-                <img src="/logo.png" alt="AI Counsellor Logo" className="w-full h-full object-cover" />
+              <div className="h-10 w-10 rounded-xl overflow-hidden bg-white/5 border border-white/10 flex items-center justify-center shadow-lg shadow-white/5 group-hover:scale-110 transition-transform relative">
+                <Image src="/logo.png" alt="AI Counsellor Logo" fill sizes="40px" className="object-cover" priority />
               </div>
               <span className="font-display font-bold text-xl tracking-tight hidden sm:block text-white">AI Counsellor</span>
             </Link>
@@ -245,8 +254,8 @@ export default function LandingPage() {
         <MobileNav>
           <MobileNavHeader>
             <Link href="/" className="flex items-center gap-2 group">
-              <div className="h-8 w-8 rounded-lg overflow-hidden bg-white/5 border border-white/10 flex items-center justify-center shadow-lg shadow-white/5">
-                <img src="/logo.png" alt="AI Counsellor Logo" className="w-full h-full object-cover" />
+              <div className="h-8 w-8 rounded-lg overflow-hidden bg-white/5 border border-white/10 flex items-center justify-center shadow-lg shadow-white/5 relative">
+                <Image src="/logo.png" alt="AI Counsellor Logo" fill sizes="32px" className="object-cover" />
               </div>
               <span className="font-display font-bold text-lg tracking-tight text-white">AI Counsellor</span>
             </Link>
@@ -371,10 +380,13 @@ export default function LandingPage() {
               <div className="relative group perspective-1000 block">
                 <div className="relative w-full aspect-square max-w-[320px] md:max-w-[420px] mx-auto mt-12 lg:mt-0">
                   <div className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent blur-3xl opacity-20 -z-10" />
-                  <img
+                  <Image
                     src="/images/hero-sculpture.png"
                     alt="Strategic AI Guidance"
-                    className="w-full h-full object-contain filter drop-shadow-[0_0_60px_rgba(255,255,255,0.15)] group-hover:scale-105 transition-transform duration-1000 [mask-image:linear-gradient(to_right,transparent,black_15%)]"
+                    fill
+                    sizes="(max-width: 768px) 320px, 420px"
+                    className="object-contain filter drop-shadow-[0_0_60px_rgba(255,255,255,0.15)] group-hover:scale-105 transition-transform duration-1000 [mask-image:linear-gradient(to_right,transparent,black_15%)]"
+                    priority
                   />
                   <div className="absolute -bottom-10 -left-10 p-6 glass-card rounded-3xl border border-white/10 backdrop-blur-3xl shadow-2xl max-w-[260px] hidden md:block">
                     <div className="flex items-center gap-2 mb-4">

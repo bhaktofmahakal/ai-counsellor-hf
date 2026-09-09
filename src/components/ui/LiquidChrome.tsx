@@ -33,7 +33,13 @@ export const LiquidChrome: React.FC<LiquidChromeProps> = ({
             container.removeChild(container.querySelector('canvas')!);
         }
 
-        const renderer = new Renderer({ antialias: true, alpha: true });
+        let renderer: Renderer;
+        try {
+            renderer = new Renderer({ antialias: true, alpha: true });
+        } catch (e) {
+            console.warn("WebGL not supported or context lost", e);
+            return;
+        }
         const gl = renderer.gl;
         // Transparent background
         gl.clearColor(0, 0, 0, 0);
